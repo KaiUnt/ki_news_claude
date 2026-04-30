@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>at.worlddirect.kinews.fetch</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/Kai.Unterrainer/Library/CloudStorage/OneDrive-world-direct.at/Dokumente/kinewsclaude/.venv/bin/python3</string>
+    <string>/Users/Kai.Unterrainer/Library/CloudStorage/OneDrive-world-direct.at/Dokumente/kinewsclaude/scripts/fetch_news.py</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/Kai.Unterrainer/Library/CloudStorage/OneDrive-world-direct.at/Dokumente/kinewsclaude</string>
+
+  <!-- Täglich um 07:00 Uhr -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>7</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/Users/Kai.Unterrainer/Library/Logs/kinews_fetch.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/Kai.Unterrainer/Library/Logs/kinews_fetch_error.log</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>
