@@ -27,24 +27,24 @@ jobs:
           SSH_USER: ${{ secrets.SSH_USER }}
         run: |
           ssh "${SSH_USER}@${SSH_HOST}" 'bash -s' <<'REMOTE'
-          set -euo pipefail
+          set -euxo pipefail
           cd ~/kinewsclaude
 
           # Pull latest
-          git fetch --quiet origin main
+          git fetch origin main
           git reset --hard origin/main
 
           # Backend deps (idempotent)
-          .venv/bin/pip install --quiet -r requirements.txt
+          .venv/bin/pip install -r requirements.txt
 
           # Frontend build
           cd frontend
-          npm ci --silent
+          npm ci
           npm run build
           cd ..
 
           # Restart backend
-          sudo systemctl restart kinews-backend.service
+          sudo /bin/systemctl restart kinews-backend.service
 
           # Smoke test
           sleep 2
