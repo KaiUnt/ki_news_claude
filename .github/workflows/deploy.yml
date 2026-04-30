@@ -1,0 +1,52 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Deploy
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+        run: |
+          ssh "${SSH_USER}@${SSH_HOST}" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd ~/kinewsclaude
+
+          # Pull latest
+          git fetch --quiet origin main
+          git reset --hard origin/main
+
+          # Backend deps (idempotent)
+          .venv/bin/pip install --quiet -r requirements.txt
+
+          # Frontend build
+          cd frontend
+          npm ci --silent
+          npm run build
+          cd ..
+
+          # Restart backend
+          sudo systemctl restart kinews-backend.service
+
+          # Smoke test
+          sleep 2
+          curl -fsS http://127.0.0.1:8004/api/stats > /dev/null && echo "Backend OK"
+          REMOTE
