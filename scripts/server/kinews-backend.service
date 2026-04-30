@@ -1,0 +1,16 @@
+[Unit]
+Description=KI-News (Claude Edition) Backend
+After=network.target
+
+[Service]
+User=kai
+WorkingDirectory=/home/kai/kinewsclaude
+ExecStart=/home/kai/kinewsclaude/.venv/bin/uvicorn backend.app:app --host 127.0.0.1 --port 8004
+EnvironmentFile=/home/kai/kinewsclaude/.env
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

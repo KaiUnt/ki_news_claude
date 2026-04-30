@@ -46,12 +46,12 @@ tail -f ~/Library/Logs/kinews_fetch.log
 
 | Methode | Pfad | Beschreibung |
 |---------|------|--------------|
-| GET | `/api/news` | News mit Filtern: `tags`, `sources`, `date_from`, `date_to`, `search`, `sort`, `limit`, `offset` |
-| GET | `/api/news/{id}` | Einzelner Artikel |
-| POST | `/api/fetch` | Manueller Fetch + Summarize |
+| GET | `/api/stories` | Stories mit Filtern: `tags`, `sources`, `date_from`, `date_to`, `search`, `sort`, `processed_only`, `limit`, `offset` |
+| GET | `/api/stories/{id}` | Einzelne Story inkl. zugeordneter Quellen |
+| POST | `/api/fetch` | Manueller Fetch + Cluster + Summarize |
 | GET | `/api/tags` | Verfügbare Tags |
 | GET | `/api/sources` | Konfigurierte Quellen |
-| GET | `/api/stats` | Statistiken (Anzahl Artikel, Quellen) |
+| GET | `/api/stats` | Statistiken (Stories, Artikel, Quellen) |
 
 ## Neue Quelle hinzufügen
 

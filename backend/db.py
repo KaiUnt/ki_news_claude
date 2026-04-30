@@ -40,21 +40,6 @@ class Article(SQLModel, table=True):
     content_hash: Optional[str] = None
     story_id: Optional[int] = Field(default=None, foreign_key="story.id", index=True)
 
-    # Legacy fields kept for backwards compat during migration
-    summary_de: Optional[str] = None
-    tags_json: Optional[str] = None
-    is_processed: bool = Field(default=False)
-
-    @property
-    def tags(self) -> list[str]:
-        if self.tags_json:
-            return json.loads(self.tags_json)
-        return []
-
-    @tags.setter
-    def tags(self, value: list[str]) -> None:
-        self.tags_json = json.dumps(value, ensure_ascii=False)
-
 
 def _db_path() -> str:
     url = settings.database_url
@@ -100,11 +85,6 @@ def get_existing_hashes(session: Session) -> set[str]:
 def get_unclustered_articles(session: Session) -> list[Article]:
     """Articles not yet assigned to a Story."""
     return list(session.exec(select(Article).where(Article.story_id == None)).all())
-
-
-def get_pending_articles(session: Session) -> list[Article]:
-    """Legacy: articles not yet summarized by Claude (individual mode)."""
-    return list(session.exec(select(Article).where(Article.is_processed == False)).all())
 
 
 def get_open_stories(session: Session, days: int = 3) -> list[Story]:

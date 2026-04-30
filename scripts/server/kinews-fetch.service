@@ -1,0 +1,12 @@
+[Unit]
+Description=KI-News (Claude Edition) Daily Fetch
+After=network.target
+
+[Service]
+Type=oneshot
+User=kai
+WorkingDirectory=/home/kai/kinewsclaude
+ExecStart=/home/kai/kinewsclaude/.venv/bin/python scripts/fetch_news.py
+EnvironmentFile=/home/kai/kinewsclaude/.env
+StandardOutput=journal
+StandardError=journal

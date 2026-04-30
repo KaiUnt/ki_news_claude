@@ -3,6 +3,21 @@ import { fetchTags, fetchSources } from '../api'
 import type { Filters, SortOrder, SourceConfig } from '../types'
 import { TagBadge } from './TagBadge'
 
+function isoLocalDate(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function mondayOf(d: Date): Date {
+  const r = new Date(d)
+  const day = r.getDay()
+  const diff = day === 0 ? 6 : day - 1
+  r.setDate(r.getDate() - diff)
+  return r
+}
+
 interface Props {
   filters: Filters
   onChange: (f: Filters) => void
@@ -13,7 +28,7 @@ export function FilterBar({ filters, onChange, total }: Props) {
   const [availableTags, setAvailableTags]       = useState<string[]>([])
   const [availableSources, setAvailableSources] = useState<SourceConfig[]>([])
   const [sourcesOpen, setSourcesOpen]           = useState(false)
-  const searchTimer                             = useRef<ReturnType<typeof setTimeout>>()
+  const searchTimer                             = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [searchDraft, setSearchDraft]           = useState(filters.search)
   const sourcesRef                              = useRef<HTMLDivElement>(null)
 
@@ -22,7 +37,6 @@ export function FilterBar({ filters, onChange, total }: Props) {
     fetchSources().then(setAvailableSources).catch(() => {})
   }, [])
 
-  // Close sources dropdown on outside click
   useEffect(() => {
     function handler(e: MouseEvent) {
       if (sourcesRef.current && !sourcesRef.current.contains(e.target as Node)) {
@@ -31,6 +45,10 @@ export function FilterBar({ filters, onChange, total }: Props) {
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  useEffect(() => () => {
+    if (searchTimer.current) clearTimeout(searchTimer.current)
   }, [])
 
   function setFilter<K extends keyof Filters>(key: K, value: Filters[K]) {
@@ -53,7 +71,7 @@ export function FilterBar({ filters, onChange, total }: Props) {
 
   function handleSearch(val: string) {
     setSearchDraft(val)
-    clearTimeout(searchTimer.current)
+    if (searchTimer.current) clearTimeout(searchTimer.current)
     searchTimer.current = setTimeout(() => setFilter('search', val), 400)
   }
 
@@ -62,13 +80,31 @@ export function FilterBar({ filters, onChange, total }: Props) {
     onChange({ tags: [], sources: [], dateFrom: '', dateTo: '', search: '', sort: 'date_desc' })
   }
 
+  const today  = isoLocalDate(new Date())
+  const monday = isoLocalDate(mondayOf(new Date()))
+  const isToday = filters.dateFrom === today  && filters.dateTo === today
+  const isWeek  = filters.dateFrom === monday && filters.dateTo === today
+
+  function toggleToday() {
+    if (isToday) onChange({ ...filters, dateFrom: '', dateTo: '' })
+    else         onChange({ ...filters, dateFrom: today, dateTo: today })
+  }
+
+  function toggleWeek() {
+    if (isWeek) onChange({ ...filters, dateFrom: '', dateTo: '' })
+    else        onChange({ ...filters, dateFrom: monday, dateTo: today })
+  }
+
   const hasFilters = filters.tags.length > 0 || filters.sources.length > 0
     || filters.dateFrom || filters.dateTo || filters.search
+
+  const quickActiveClass   = 'bg-indigo-950 border-indigo-700 text-indigo-300'
+  const quickInactiveClass = 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'
 
   return (
     <div className="sticky top-0 z-20 bg-slate-950/90 backdrop-blur border-b border-slate-800 px-4 py-3 flex flex-col gap-3">
 
-      {/* Row 1: Search + Sort + Clear */}
+      {/* Row 1: Search + Sort + Clear + Total */}
       <div className="flex gap-2 items-center">
         <input
           type="search"
@@ -78,7 +114,6 @@ export function FilterBar({ filters, onChange, total }: Props) {
           className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
         />
 
-        {/* Sort */}
         <select
           value={filters.sort}
           onChange={e => setFilter('sort', e.target.value as SortOrder)}
@@ -90,6 +125,7 @@ export function FilterBar({ filters, onChange, total }: Props) {
 
         {hasFilters && (
           <button
+            type="button"
             onClick={clearAll}
             className="text-xs text-slate-500 hover:text-slate-300 transition-colors whitespace-nowrap"
           >
@@ -102,10 +138,9 @@ export function FilterBar({ filters, onChange, total }: Props) {
         </span>
       </div>
 
-      {/* Row 2: Tags + Date + Sources */}
+      {/* Row 2: Tags + Quick filters + Date range + Sources */}
       <div className="flex flex-wrap gap-2 items-center">
 
-        {/* Tag chips */}
         {availableTags.map(tag => (
           <TagBadge
             key={tag}
@@ -117,7 +152,25 @@ export function FilterBar({ filters, onChange, total }: Props) {
 
         <div className="w-px h-4 bg-slate-700 mx-1" />
 
-        {/* Date from */}
+        <button
+          type="button"
+          onClick={toggleToday}
+          aria-pressed={isToday}
+          className={`text-xs px-2 py-0.5 rounded border transition-colors ${isToday ? quickActiveClass : quickInactiveClass}`}
+        >
+          Heute
+        </button>
+        <button
+          type="button"
+          onClick={toggleWeek}
+          aria-pressed={isWeek}
+          className={`text-xs px-2 py-0.5 rounded border transition-colors ${isWeek ? quickActiveClass : quickInactiveClass}`}
+        >
+          Diese Woche
+        </button>
+
+        <div className="w-px h-4 bg-slate-700 mx-1" />
+
         <input
           type="date"
           value={filters.dateFrom}
@@ -136,14 +189,12 @@ export function FilterBar({ filters, onChange, total }: Props) {
 
         <div className="w-px h-4 bg-slate-700 mx-1" />
 
-        {/* Sources dropdown */}
         <div className="relative" ref={sourcesRef}>
           <button
+            type="button"
             onClick={() => setSourcesOpen(o => !o)}
             className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded border transition-colors ${
-              filters.sources.length > 0
-                ? 'bg-indigo-950 border-indigo-700 text-indigo-300'
-                : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'
+              filters.sources.length > 0 ? quickActiveClass : quickInactiveClass
             }`}
           >
             Quellen {filters.sources.length > 0 && `(${filters.sources.length})`} ▾

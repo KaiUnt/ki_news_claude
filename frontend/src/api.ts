@@ -6,6 +6,7 @@ export async function fetchStories(
   filters: Filters,
   offset = 0,
   limit = 30,
+  signal?: AbortSignal,
 ): Promise<StoriesResponse> {
   const params = new URLSearchParams()
   if (filters.tags.length)    params.set('tags', filters.tags.join(','))
@@ -17,7 +18,7 @@ export async function fetchStories(
   params.set('limit', String(limit))
   params.set('offset', String(offset))
 
-  const res = await fetch(`${BASE}/stories?${params}`)
+  const res = await fetch(`${BASE}/stories?${params}`, { signal })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.json()
 }
@@ -44,6 +45,19 @@ export async function fetchSources(): Promise<SourceConfig[]> {
 
 export async function fetchStats() {
   const res = await fetch(`${BASE}/stats`)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
+export interface FetchResult {
+  fetched: number
+  new_saved: number
+  clustered: number
+  stories_summarized: number
+}
+
+export async function triggerFetch(): Promise<FetchResult> {
+  const res = await fetch(`${BASE}/fetch`, { method: 'POST' })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.json()
 }

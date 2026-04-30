@@ -5,50 +5,52 @@ import type { Story, Filters } from '../types'
 const PAGE_SIZE = 30
 
 export function useStories(filters: Filters) {
-  const [stories, setStories]     = useState<Story[]>([])
-  const [total, setTotal]         = useState(0)
-  const [loading, setLoading]     = useState(false)
+  const [stories, setStories]         = useState<Story[]>([])
+  const [total, setTotal]             = useState(0)
+  const [loading, setLoading]         = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
-  const [error, setError]         = useState<string | null>(null)
-  const offsetRef                 = useRef(0)
-  const activeFilters             = useRef(filters)
+  const [error, setError]             = useState<string | null>(null)
+  const [refreshKey, setRefreshKey]   = useState(0)
+  const offsetRef                     = useRef(0)
 
-  const load = useCallback(async (reset: boolean, currentFilters: Filters) => {
-    const offset = reset ? 0 : offsetRef.current
-    reset ? setLoading(true) : setLoadingMore(true)
-    setError(null)
-    try {
-      const data = await fetchStories(currentFilters, offset, PAGE_SIZE)
-      setTotal(data.total)
-      setStories(prev => reset ? data.items : [...prev, ...data.items])
-      offsetRef.current = offset + data.items.length
-    } catch (e) {
-      setError('Fehler beim Laden der Stories')
-    } finally {
-      setLoading(false)
-      setLoadingMore(false)
-    }
-  }, [])
-
-  // Reset & reload whenever filters change
+  // AbortController guards against stale responses when filters change rapidly.
   useEffect(() => {
-    activeFilters.current = filters
-    offsetRef.current = 0
-    load(true, filters)
-  }, [
-    filters.tags.join(','),
-    filters.sources.join(','),
-    filters.dateFrom,
-    filters.dateTo,
-    filters.search,
-    filters.sort,
-  ])
+    const ac = new AbortController()
+    setLoading(true)
+    setError(null)
+
+    fetchStories(filters, 0, PAGE_SIZE, ac.signal)
+      .then(data => {
+        setTotal(data.total)
+        setStories(data.items)
+        offsetRef.current = data.items.length
+      })
+      .catch(e => {
+        if (e.name !== 'AbortError') setError('Fehler beim Laden der Stories')
+      })
+      .finally(() => {
+        if (!ac.signal.aborted) setLoading(false)
+      })
+
+    return () => ac.abort()
+  }, [filters, refreshKey])
 
   const loadMore = useCallback(() => {
-    if (!loadingMore && stories.length < total) {
-      load(false, activeFilters.current)
-    }
-  }, [load, loadingMore, stories.length, total])
+    if (loadingMore || stories.length >= total) return
+    setLoadingMore(true)
+    fetchStories(filters, offsetRef.current, PAGE_SIZE)
+      .then(data => {
+        setStories(prev => [...prev, ...data.items])
+        offsetRef.current += data.items.length
+      })
+      .catch(() => setError('Fehler beim Nachladen'))
+      .finally(() => setLoadingMore(false))
+  }, [filters, loadingMore, stories.length, total])
 
-  return { stories, total, loading, loadingMore, error, loadMore, hasMore: stories.length < total }
+  const refresh = useCallback(() => setRefreshKey(k => k + 1), [])
+
+  return {
+    stories, total, loading, loadingMore, error, loadMore, refresh,
+    hasMore: stories.length < total,
+  }
 }

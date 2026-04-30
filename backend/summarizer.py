@@ -10,7 +10,6 @@ from sqlmodel import Session, select
 
 from .config import settings, AVAILABLE_TAGS
 from .db import Article, Story, engine
-from .fetcher.base import RawArticle
 
 _SYSTEM_PROMPT = f"""Du bist ein präziser KI-News-Analyst. Fasse News-Stories auf Deutsch zusammen und vergib Tags.
 
@@ -56,10 +55,14 @@ class Summarizer:
             if best is None:
                 continue
             result = self.summarize_story(story, best)
+            # On API errors (rate limit, network, etc.) `_call` returns summary_de=None.
+            # Leave the story as pending so a future run can retry it.
+            if result.get("summary_de") is None:
+                continue
             with Session(engine) as session:
                 s = session.get(Story, story.id)
                 if s:
-                    s.summary_de = result.get("summary_de")
+                    s.summary_de = result["summary_de"]
                     s.tags = result.get("tags", [])
                     s.is_processed = True
                     session.add(s)
@@ -102,13 +105,3 @@ class Summarizer:
         except Exception as exc:
             print(f"[Summarizer] Error: {exc}")
             return {"summary_de": None, "tags": ["Sonstiges"]}
-
-    # ── Legacy: single-article summarization (used before story model) ────────
-    def _summarize_one(self, article: RawArticle) -> dict:
-        user_content = (
-            f"Titel: {article.title}\n"
-            f"Quelle: {article.source_name}\n"
-            f"Inhalt: {article.content or '(kein Inhalt)'}"
-            + (f"\nHinweis: {article.tag_hint}" if article.tag_hint else "")
-        )
-        return self._call(user_content)

@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
 import { FilterBar } from './components/FilterBar'
 import { StoryCard } from './components/StoryCard'
+import { StoryDetailModal } from './components/StoryDetailModal'
 import { useStories } from './hooks/useStories'
-import { fetchStats } from './api'
+import { usePersistedFilters } from './hooks/usePersistedFilters'
+import { fetchStats, triggerFetch } from './api'
 import type { Filters } from './types'
 
 const DEFAULT_FILTERS: Filters = {
@@ -15,18 +17,34 @@ const DEFAULT_FILTERS: Filters = {
 }
 
 export default function App() {
-  const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS)
-  const [stats, setStats]     = useState<{ total_stories: number; total_articles: number } | null>(null)
-  const { stories, total, loading, loadingMore, error, loadMore, hasMore } = useStories(filters)
+  const [filters, setFilters]                 = usePersistedFilters(DEFAULT_FILTERS)
+  const [stats, setStats]                     = useState<{ total_stories: number; total_articles: number } | null>(null)
+  const [refreshing, setRefreshing]           = useState(false)
+  const [selectedStoryId, setSelectedStoryId] = useState<number | null>(null)
+  const { stories, total, loading, loadingMore, error, loadMore, refresh, hasMore } = useStories(filters)
 
   useEffect(() => {
     fetchStats().then(setStats).catch(() => {})
   }, [])
 
+  async function handleRefresh() {
+    if (refreshing) return
+    setRefreshing(true)
+    try {
+      await triggerFetch()
+      refresh()
+      const s = await fetchStats()
+      setStats(s)
+    } catch {
+      // Fehler werden via useStories.error sichtbar
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-[#0f1117] text-slate-100">
 
-      {/* Header */}
       <header className="border-b border-slate-800 px-4 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -49,16 +67,28 @@ export default function App() {
                 weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric',
               })}
             </span>
+            <button
+              type="button"
+              onClick={handleRefresh}
+              disabled={refreshing}
+              title="Neue Artikel holen, clustern und zusammenfassen"
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-slate-700 hover:border-slate-500 text-slate-300 hover:text-slate-100 disabled:opacity-50 transition-colors"
+            >
+              {refreshing ? (
+                <span className="w-3 h-3 border-2 border-slate-500 border-t-slate-300 rounded-full animate-spin" />
+              ) : (
+                <span aria-hidden="true">↻</span>
+              )}
+              <span>Aktualisieren</span>
+            </button>
           </div>
         </div>
       </header>
 
-      {/* FilterBar */}
       <div className="max-w-7xl mx-auto">
         <FilterBar filters={filters} onChange={setFilters} total={total} />
       </div>
 
-      {/* Content */}
       <main className="max-w-7xl mx-auto px-4 py-6">
 
         {loading && (
@@ -83,15 +113,15 @@ export default function App() {
         {!loading && stories.length > 0 && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {stories.map(story => (
-              <StoryCard key={story.id} story={story} />
+              <StoryCard key={story.id} story={story} onSelect={setSelectedStoryId} />
             ))}
           </div>
         )}
 
-        {/* Load more */}
         {hasMore && !loading && (
           <div className="flex justify-center mt-8">
             <button
+              type="button"
               onClick={loadMore}
               disabled={loadingMore}
               className="px-6 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sm text-slate-300 transition-colors disabled:opacity-50 flex items-center gap-2"
@@ -104,6 +134,13 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {selectedStoryId !== null && (
+        <StoryDetailModal
+          storyId={selectedStoryId}
+          onClose={() => setSelectedStoryId(null)}
+        />
+      )}
     </div>
   )
 }

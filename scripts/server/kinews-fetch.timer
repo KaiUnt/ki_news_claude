@@ -1,0 +1,10 @@
+[Unit]
+Description=KI-News (Claude Edition) Daily Fetch at 07:30
+Requires=kinews-fetch.service
+
+[Timer]
+OnCalendar=*-*-* 07:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

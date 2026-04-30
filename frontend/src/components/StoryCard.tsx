@@ -1,6 +1,4 @@
-import { useState } from 'react'
-import { fetchStoryDetail } from '../api'
-import type { Story, Source } from '../types'
+import type { Story } from '../types'
 import { TagBadge } from './TagBadge'
 
 function relativeTime(iso: string): string {
@@ -13,39 +11,26 @@ function relativeTime(iso: string): string {
   return new Date(iso).toLocaleDateString('de-AT', { day: '2-digit', month: '2-digit' })
 }
 
-function sourceIcon(type: string) {
-  if (type === 'hackernews') return '🔶'
-  return '📰'
-}
-
 interface Props {
   story: Story
+  onSelect: (id: number) => void
 }
 
-export function StoryCard({ story }: Props) {
-  const [open, setOpen]       = useState(false)
-  const [sources, setSources] = useState<Source[] | null>(null)
-  const [loading, setLoading] = useState(false)
-
-  async function toggle() {
-    if (!open && sources === null) {
-      setLoading(true)
-      try {
-        const detail = await fetchStoryDetail(story.id)
-        setSources(detail.sources)
-      } catch {
-        setSources([])
-      } finally {
-        setLoading(false)
-      }
-    }
-    setOpen(o => !o)
-  }
-
+export function StoryCard({ story, onSelect }: Props) {
   return (
-    <div className="bg-slate-900 border border-slate-700/60 rounded-xl p-4 flex flex-col gap-3 hover:border-slate-600 transition-colors">
-
-      {/* Tags + timestamp */}
+    <article
+      onClick={() => onSelect(story.id)}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onSelect(story.id)
+        }
+      }}
+      tabIndex={0}
+      role="button"
+      aria-label={`Story öffnen: ${story.title_de}`}
+      className="bg-slate-900 border border-slate-700/60 rounded-xl p-4 flex flex-col gap-3 hover:border-slate-600 cursor-pointer transition-colors focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30"
+    >
       <div className="flex items-start justify-between gap-2">
         <div className="flex flex-wrap gap-1">
           {story.tags.map(t => <TagBadge key={t} tag={t} />)}
@@ -55,53 +40,21 @@ export function StoryCard({ story }: Props) {
         </span>
       </div>
 
-      {/* Title */}
       <h2 className="text-slate-100 font-semibold text-base leading-snug m-0">
         {story.title_de}
       </h2>
 
-      {/* Summary */}
       {story.summary_de && (
         <p className="text-slate-400 text-sm leading-relaxed m-0 line-clamp-3">
           {story.summary_de}
         </p>
       )}
 
-      {/* Sources toggle */}
-      <button
-        onClick={toggle}
-        className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-indigo-400 transition-colors mt-auto pt-1 border-t border-slate-700/50 -mx-4 px-4 text-left"
-      >
-        <span className={`transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>▾</span>
-        <span>
-          {loading ? 'Lade…' : `${story.source_count} ${story.source_count === 1 ? 'Quelle' : 'Quellen'}`}
-        </span>
-      </button>
-
-      {/* Sources list */}
-      {open && sources && (
-        <ul className="flex flex-col gap-1 -mt-1">
-          {sources.map(src => (
-            <li key={src.id} className="flex items-center gap-2 text-xs">
-              <span className="text-base leading-none">{sourceIcon(src.source_type)}</span>
-              <a
-                href={src.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-indigo-400 hover:text-indigo-300 hover:underline truncate flex-1 min-w-0"
-                title={src.title}
-              >
-                {src.source_name}
-              </a>
-              {src.published_at && (
-                <span className="text-slate-600 shrink-0">
-                  {new Date(src.published_at).toLocaleDateString('de-AT', { day: '2-digit', month: '2-digit' })}
-                </span>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+      <div className="text-xs text-slate-500 mt-auto pt-2 border-t border-slate-700/50 -mx-4 px-4 flex items-center gap-1.5">
+        <span>{story.source_count} {story.source_count === 1 ? 'Quelle' : 'Quellen'}</span>
+        <span className="text-slate-600">·</span>
+        <span className="text-indigo-400/70">Details ansehen →</span>
+      </div>
+    </article>
   )
 }

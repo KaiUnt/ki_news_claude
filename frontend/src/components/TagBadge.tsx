@@ -18,15 +18,23 @@ interface Props {
 
 export function TagBadge({ tag, active = false, onClick }: Props) {
   const base = TAG_STYLES[tag] ?? DEFAULT_STYLE
-  const cursor = onClick ? 'cursor-pointer hover:opacity-80' : ''
-  const ring = active ? 'ring-1 ring-white/30' : ''
+  const baseClass = `inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${base} select-none`
 
-  return (
-    <span
-      className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${base} ${cursor} ${ring} select-none transition-opacity`}
-      onClick={onClick}
-    >
-      {tag}
-    </span>
-  )
+  if (onClick) {
+    const stateClass = active
+      ? 'opacity-100 ring-2 ring-white/60'
+      : 'opacity-40 hover:opacity-90'
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        aria-pressed={active}
+        className={`${baseClass} ${stateClass} cursor-pointer transition-opacity`}
+      >
+        {tag}
+      </button>
+    )
+  }
+
+  return <span className={baseClass}>{tag}</span>
 }
