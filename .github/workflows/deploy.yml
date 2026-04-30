@@ -46,7 +46,7 @@ jobs:
           # Restart backend
           sudo /bin/systemctl restart kinews-backend.service
 
-          # Smoke test
-          sleep 2
-          curl -fsS http://127.0.0.1:8004/api/stats > /dev/null && echo "Backend OK"
+          # Smoke test (wait up to ~15s for backend to come up)
+          sleep 3
+          curl -fsS --retry 5 --retry-delay 2 --retry-all-errors http://127.0.0.1:8004/api/stats > /dev/null && echo "Backend OK"
           REMOTE
