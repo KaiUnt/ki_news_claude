@@ -1,9 +1,9 @@
 [Unit]
-Description=KI-News (Claude Edition) Daily Fetch at 07:30
+Description=KI-News (Claude Edition) Daily Fetch at 07:30 Europe/Vienna
 Requires=kinews-fetch.service
 
 [Timer]
-OnCalendar=*-*-* 07:30:00
+OnCalendar=*-*-* 07:30:00 Europe/Vienna
 Persistent=true
 
 [Install]
