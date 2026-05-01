@@ -2,9 +2,10 @@ from datetime import datetime, date
 from typing import Optional
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from sqlmodel import select, Session
 from .db import (
-    Article, Story, create_db_and_tables, engine,
+    Article, Story, UserProfile, DailyDigest, create_db_and_tables, engine,
     get_existing_urls, get_existing_hashes,
     get_unclustered_articles, get_pending_stories,
 )
@@ -12,6 +13,7 @@ from .fetcher import RSSFetcher, HackerNewsFetcher, RawArticle
 from .deduplicator import deduplicate, content_hash
 from .clusterer import cluster_articles
 from .summarizer import Summarizer
+from . import digest_generator
 from .config import AVAILABLE_TAGS, RSS_FEEDS
 
 app = FastAPI(title="KI-News Dashboard API", version="2.0.0")
@@ -56,6 +58,20 @@ def _source_to_dict(a: Article) -> dict:
         "source_type": a.source_type,
         "published_at": a.published_at.isoformat() if a.published_at else None,
     }
+
+
+def _profile_to_dict(p: UserProfile) -> dict:
+    return {
+        "id": p.id,
+        "name": p.name,
+        "priority_prompt": p.priority_prompt,
+        "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+    }
+
+
+class ProfileUpdate(BaseModel):
+    name: Optional[str] = None
+    priority_prompt: Optional[str] = None
 
 
 # ── Story endpoints ───────────────────────────────────────────────────────────
@@ -150,6 +166,112 @@ def list_sources():
     return {"sources": sources}
 
 
+# ── Profile endpoints ─────────────────────────────────────────────────────────
+
+@app.get("/api/profile")
+def get_profile():
+    with Session(engine) as session:
+        profile = session.get(UserProfile, 1)
+        if not profile:
+            raise HTTPException(status_code=500, detail="Default profile not initialized")
+        return _profile_to_dict(profile)
+
+
+@app.put("/api/profile")
+def update_profile(body: ProfileUpdate):
+    with Session(engine) as session:
+        profile = session.get(UserProfile, 1)
+        if not profile:
+            raise HTTPException(status_code=500, detail="Default profile not initialized")
+        if body.name is not None:
+            profile.name = body.name
+        if body.priority_prompt is not None:
+            profile.priority_prompt = body.priority_prompt
+        profile.updated_at = datetime.utcnow()
+        session.add(profile)
+        session.commit()
+        session.refresh(profile)
+        return _profile_to_dict(profile)
+
+
+# ── Digest endpoints ──────────────────────────────────────────────────────────
+
+def _digest_summary(d: DailyDigest) -> dict:
+    return {
+        "id": d.id,
+        "generated_at": d.generated_at.isoformat() if d.generated_at else None,
+        "window_start": d.window_start.isoformat() if d.window_start else None,
+        "window_end": d.window_end.isoformat() if d.window_end else None,
+        "meta_summary_de": d.meta_summary_de,
+        "model_id": d.model_id,
+        "top_story_count": len(d.top_stories),
+    }
+
+
+@app.get("/api/digest/latest")
+def get_latest_digest():
+    with Session(engine) as session:
+        digest = session.exec(
+            select(DailyDigest).order_by(DailyDigest.generated_at.desc()).limit(1)
+        ).first()
+        if not digest:
+            raise HTTPException(status_code=404, detail="No digest exists yet")
+
+        story_ids = [t.get("story_id") for t in digest.top_stories if t.get("story_id")]
+        story_by_id: dict[int, Story] = {}
+        if story_ids:
+            stories = session.exec(select(Story).where(Story.id.in_(story_ids))).all()
+            story_by_id = {s.id: s for s in stories}
+
+        top_with_data = []
+        for entry in digest.top_stories:
+            sid = entry.get("story_id")
+            story = story_by_id.get(sid)
+            if story is None:
+                continue
+            top_with_data.append({
+                "rank": entry.get("rank"),
+                "why": entry.get("why"),
+                "story": _story_to_dict(story),
+            })
+        top_with_data.sort(key=lambda x: x.get("rank") or 999)
+
+    return {
+        **_digest_summary(digest),
+        "top_stories": top_with_data,
+    }
+
+
+@app.get("/api/digest")
+def list_digests(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    with Session(engine) as session:
+        digests = session.exec(
+            select(DailyDigest)
+            .order_by(DailyDigest.generated_at.desc())
+            .offset(offset)
+            .limit(limit)
+        ).all()
+    return {
+        "offset": offset,
+        "limit": limit,
+        "items": [_digest_summary(d) for d in digests],
+    }
+
+
+@app.post("/api/digest/regenerate")
+def regenerate_digest():
+    digest = digest_generator.generate(reuse_last_window=True)
+    if digest is None:
+        raise HTTPException(
+            status_code=400,
+            detail="No processed stories in the digest window — nothing to digest yet.",
+        )
+    return _digest_summary(digest)
+
+
 @app.get("/api/stats")
 def get_stats():
     with Session(engine) as session:
@@ -176,8 +298,9 @@ def get_stats():
 def trigger_fetch(
     cluster: bool = Query(True),
     summarize: bool = Query(True),
+    digest: bool = Query(True),
 ):
-    """Fetch → dedup → save → cluster → summarize pipeline."""
+    """Fetch → dedup → save → cluster → summarize → digest pipeline."""
     # Fetch
     fetchers = [RSSFetcher(), HackerNewsFetcher()]
     raw: list[RawArticle] = []
@@ -232,9 +355,20 @@ def trigger_fetch(
         summarizer = Summarizer()
         summarized = summarizer.summarize_pending_stories()
 
+    # Digest
+    digest_id: Optional[int] = None
+    if digest and cluster and summarize:
+        try:
+            generated = digest_generator.generate()
+            if generated is not None:
+                digest_id = generated.id
+        except Exception as exc:
+            print(f"[fetch] Digest generation failed: {exc}")
+
     return {
         "fetched": len(raw),
         "new_saved": saved,
         "clustered": clustered,
         "stories_summarized": summarized,
+        "digest_id": digest_id,
     }

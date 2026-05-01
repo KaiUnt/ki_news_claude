@@ -24,3 +24,8 @@ frontend/dist/
 
 # Logs
 *.log
+
+# Local-only docs (für Claude-Code Kontext, nicht ins Repo)
+SERVER.md
+CLAUDE.md
+DASHBOARD_PLAN.md

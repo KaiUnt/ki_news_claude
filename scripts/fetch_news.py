@@ -7,6 +7,7 @@ Pipeline:
   3. Neue Artikel speichern (story_id=null)
   4. Claude clustert alle unklustierten Artikel → Story-Zuordnung
   5. Claude generiert Summaries für alle neuen/unverarbeiteten Stories
+  6. Claude generiert den Tages-Digest (Top-Stories + Meta-Summary)
 """
 import sys
 import os
@@ -27,6 +28,7 @@ from backend.fetcher import RSSFetcher, HackerNewsFetcher, RawArticle
 from backend.deduplicator import deduplicate, content_hash
 from backend.clusterer import cluster_articles
 from backend.summarizer import Summarizer
+from backend import digest_generator
 
 console = Console()
 
@@ -54,7 +56,7 @@ def _save_articles(new_articles: list[RawArticle]) -> int:
     return saved
 
 
-def main(cluster: bool = True, summarize: bool = True) -> None:
+def main(cluster: bool = True, summarize: bool = True, digest: bool = True) -> None:
     console.rule("[bold cyan]KI-News Fetch[/bold cyan]")
     create_db_and_tables()
 
@@ -130,6 +132,26 @@ def main(cluster: bool = True, summarize: bool = True) -> None:
     elif not summarize:
         console.print("[yellow]Zusammenfassung übersprungen (--no-summarize).[/yellow]")
 
+    # ── Phase 6: Tages-Digest ─────────────────────────────────────────────────
+    digest_status = "–"
+    if digest and cluster and summarize:
+        console.print(f"\n[cyan]Tages-Digest via Claude API...[/cyan]")
+        with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console) as progress:
+            task = progress.add_task("Digest...", total=None)
+            try:
+                generated = digest_generator.generate()
+                if generated is None:
+                    digest_status = "übersprungen (kein Material)"
+                    progress.update(task, description="[yellow]Keine Stories im Fenster[/yellow]")
+                else:
+                    digest_status = f"id={generated.id} ({len(generated.top_stories)} Top-Stories)"
+                    progress.update(task, description=f"[green]Digest {digest_status}[/green]")
+            except Exception as exc:
+                digest_status = f"Fehler: {exc}"
+                progress.update(task, description=f"[red]Digest fehlgeschlagen: {exc}[/red]")
+    elif not digest:
+        console.print("[yellow]Digest übersprungen (--no-digest).[/yellow]")
+
     # ── Report ────────────────────────────────────────────────────────────────
     table = Table(title="Ergebnis", show_header=True)
     table.add_column("Metrik", style="cyan")
@@ -138,6 +160,7 @@ def main(cluster: bool = True, summarize: bool = True) -> None:
     table.add_row("Neu gespeichert", str(saved))
     table.add_row("Geclustert", str(clustered) if cluster else "–")
     table.add_row("Stories summarisiert", str(summarized) if summarize else "–")
+    table.add_row("Digest", digest_status if digest else "–")
     console.print(table)
     console.rule("[bold green]Fertig[/bold green]")
 
@@ -147,5 +170,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="KI-News Fetch Script")
     parser.add_argument("--no-cluster", action="store_true", help="Skip Claude clustering")
     parser.add_argument("--no-summarize", action="store_true", help="Skip Claude summarization")
+    parser.add_argument("--no-digest", action="store_true", help="Skip daily digest generation")
     args = parser.parse_args()
-    main(cluster=not args.no_cluster, summarize=not args.no_summarize)
+    main(
+        cluster=not args.no_cluster,
+        summarize=not args.no_summarize,
+        digest=not args.no_digest,
+    )

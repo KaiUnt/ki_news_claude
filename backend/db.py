@@ -41,6 +41,37 @@ class Article(SQLModel, table=True):
     story_id: Optional[int] = Field(default=None, foreign_key="story.id", index=True)
 
 
+class UserProfile(SQLModel, table=True):
+    """User profile. Single-row for now (id=1); schema is multi-user-ready."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(default="Kai")
+    priority_prompt: str = Field(default="")
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class DailyDigest(SQLModel, table=True):
+    """A daily curated digest: meta-summary + Claude-picked top stories."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_profile_id: int = Field(foreign_key="userprofile.id", index=True)
+    generated_at: datetime = Field(default_factory=datetime.utcnow)
+    window_start: datetime
+    window_end: datetime
+    meta_summary_de: str
+    top_story_ids_json: str  # JSON: [{"story_id": int, "rank": int, "why": str}, ...]
+    model_id: str
+    raw_response: Optional[str] = None
+
+    @property
+    def top_stories(self) -> list[dict]:
+        if self.top_story_ids_json:
+            return json.loads(self.top_story_ids_json)
+        return []
+
+    @top_stories.setter
+    def top_stories(self, value: list[dict]) -> None:
+        self.top_story_ids_json = json.dumps(value, ensure_ascii=False)
+
+
 def _db_path() -> str:
     url = settings.database_url
     if url.startswith("sqlite:///"):
@@ -56,6 +87,7 @@ engine = create_engine(_db_path(), echo=False)
 def create_db_and_tables() -> None:
     SQLModel.metadata.create_all(engine)
     _migrate_schema()
+    _ensure_default_profile()
 
 
 def _migrate_schema() -> None:
@@ -65,6 +97,14 @@ def _migrate_schema() -> None:
         if "story_id" not in existing:
             conn.execute(text("ALTER TABLE article ADD COLUMN story_id INTEGER REFERENCES story(id)"))
             conn.commit()
+
+
+def _ensure_default_profile() -> None:
+    """Insert the single-row default profile (id=1) if it doesn't exist yet."""
+    with Session(engine) as session:
+        if session.get(UserProfile, 1) is None:
+            session.add(UserProfile(id=1, name="Kai", priority_prompt=""))
+            session.commit()
 
 
 def get_session() -> Session:

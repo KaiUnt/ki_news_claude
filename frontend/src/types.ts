@@ -45,3 +45,39 @@ export interface Filters {
   search: string
   sort: SortOrder
 }
+
+export type View = 'dashboard' | 'all' | 'settings'
+
+export interface DigestTopStory {
+  rank: number
+  why: string
+  story: Story
+}
+
+export interface DigestLatest {
+  id: number
+  generated_at: string
+  window_start: string
+  window_end: string
+  meta_summary_de: string
+  model_id: string
+  top_story_count: number
+  top_stories: DigestTopStory[]
+}
+
+export interface DigestSummary {
+  id: number
+  generated_at: string
+  window_start: string
+  window_end: string
+  meta_summary_de: string
+  model_id: string
+  top_story_count: number
+}
+
+export interface UserProfile {
+  id: number
+  name: string
+  priority_prompt: string
+  updated_at: string
+}

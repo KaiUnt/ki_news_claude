@@ -1,4 +1,7 @@
-import type { StoriesResponse, StoryDetail, SourceConfig, Filters } from './types'
+import type {
+  StoriesResponse, StoryDetail, SourceConfig, Filters,
+  DigestLatest, DigestSummary, UserProfile,
+} from './types'
 
 const BASE = '/api'
 
@@ -54,10 +57,42 @@ export interface FetchResult {
   new_saved: number
   clustered: number
   stories_summarized: number
+  digest_id: number | null
 }
 
 export async function triggerFetch(): Promise<FetchResult> {
   const res = await fetch(`${BASE}/fetch`, { method: 'POST' })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
+export async function fetchDigestLatest(): Promise<DigestLatest | null> {
+  const res = await fetch(`${BASE}/digest/latest`)
+  if (res.status === 404) return null
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
+export async function regenerateDigest(): Promise<DigestSummary> {
+  const res = await fetch(`${BASE}/digest/regenerate`, { method: 'POST' })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
+export async function fetchProfile(): Promise<UserProfile> {
+  const res = await fetch(`${BASE}/profile`)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
+export async function updateProfile(
+  body: Partial<Pick<UserProfile, 'name' | 'priority_prompt'>>,
+): Promise<UserProfile> {
+  const res = await fetch(`${BASE}/profile`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.json()
 }
