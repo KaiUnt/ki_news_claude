@@ -17,7 +17,13 @@ RSS_FEEDS = [
     # ── KI-Labs & Unternehmen ──────────────────────────────────────────────────
     {
         "name": "OpenAI Blog",
-        "url": "https://openai.com/blog/rss.xml",
+        "url": "https://openai.com/news/rss.xml",
+        "tag_hint": "Neue Modelle",
+    },
+    {
+        "name": "Anthropic News",
+        # Anthropic hat keinen offiziellen Feed; Olshansk-Mirror wird stuendlich regeneriert.
+        "url": "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_anthropic_news.xml",
         "tag_hint": "Neue Modelle",
     },
     {
@@ -50,6 +56,16 @@ RSS_FEEDS = [
         "url": "https://www.microsoft.com/en-us/research/blog/feed/",
         "tag_hint": "Forschung / Paper",
     },
+    {
+        "name": "Microsoft AI Blog",
+        "url": "https://blogs.microsoft.com/ai/feed/",
+        "tag_hint": "Tools & Produkte",
+    },
+    {
+        "name": "Microsoft Power Platform Blog",
+        "url": "https://powerautomate.microsoft.com/en-us/blog/feed/",
+        "tag_hint": "Tools & Produkte",
+    },
     # ── Community & Open Source ────────────────────────────────────────────────
     {
         "name": "HuggingFace Blog",
@@ -58,12 +74,17 @@ RSS_FEEDS = [
     },
     {
         "name": "ArXiv cs.AI",
-        "url": "https://arxiv.org/rss/cs.AI",
+        "url": "https://export.arxiv.org/rss/cs.AI",
         "tag_hint": "Forschung / Paper",
     },
     {
         "name": "ArXiv cs.LG",
-        "url": "https://arxiv.org/rss/cs.LG",
+        "url": "https://export.arxiv.org/rss/cs.LG",
+        "tag_hint": "Forschung / Paper",
+    },
+    {
+        "name": "ArXiv cs.CL",
+        "url": "https://export.arxiv.org/rss/cs.CL",
         "tag_hint": "Forschung / Paper",
     },
     # ── Technologie-Medien ─────────────────────────────────────────────────────
@@ -101,6 +122,22 @@ RSS_FEEDS = [
         "name": "AWS ML Blog",
         "url": "https://aws.amazon.com/blogs/machine-learning/feed/",
         "tag_hint": "Technik & Infrastruktur",
+    },
+    {
+        "name": "The Decoder",
+        "url": "https://the-decoder.de/feed/",
+        "tag_hint": "Neue Modelle",
+    },
+    {
+        "name": "Heise KI",
+        "url": "https://www.heise.de/thema/Kuenstliche-Intelligenz.xml",
+        "tag_hint": "Neue Modelle",
+    },
+    # ── Regulierung & Policy ───────────────────────────────────────────────────
+    {
+        "name": "EU AI Act News",
+        "url": "https://artificialintelligenceact.eu/feed/",
+        "tag_hint": "Sonstiges",
     },
 ]
 

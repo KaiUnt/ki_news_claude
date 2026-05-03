@@ -1,57 +1,92 @@
 # KI-News Dashboard
 
-Tägliche KI-News aus RSS-Feeds und Hacker News — dedupliziert, auf Deutsch zusammengefasst (via Claude API), filterbar nach Themen.
+Persönliches Dashboard für tägliche KI-News aus RSS-Feeds und Hacker News — dedupliziert, geclustert, auf Deutsch zusammengefasst (via Claude API), kuratiert nach eigener Prioritäts-Vorgabe.
 
 ## Features
 
-- **Quellen:** 11 RSS-Feeds (HuggingFace, ArXiv, TechCrunch AI, The Verge, Anthropic Blog, …) + Hacker News
-- **Deduplizierung:** URL-basiert + Fuzzy-Titel-Matching
-- **Zusammenfassungen:** Claude API, automatisch auf Deutsch
+- **Quellen:** 23 RSS-Feeds (OpenAI, Anthropic, DeepMind, Google AI, NVIDIA, Microsoft Research/AI, HuggingFace, ArXiv cs.AI/cs.LG/cs.CL, TechCrunch AI, The Decoder, Heise KI, EU AI Act, …) + Hacker News
+- **Pipeline:** Fetch → Dedup → Clustering (Claude) → Summary (Claude) → Tages-Digest (Claude)
+- **Story-Clustering:** mehrere Artikel über dasselbe Ereignis werden zu einer Story zusammengefasst
+- **Tages-Digest:** Claude wählt 5–7 Top-Stories und schreibt eine 2–3-Absätze-Tageszusammenfassung — abgestimmt auf einen frei editierbaren Prioritäts-Prompt
+- **Frontend:** React 19 + Tailwind 4, drei Views (Dashboard / Alle Stories / Settings), Tab-Wahl persistent
 - **Tags:** Neue Modelle · Tools & Produkte · Technik & Infrastruktur · Forschung/Paper · Kosten & Business · Open Source
-- **API:** REST-Endpunkte mit Filter, Suche, Sortierung
-- **Scheduler:** macOS LaunchAgent, täglich 07:00 Uhr
+
+## Stack
+
+| Schicht | Tech |
+|---|---|
+| Backend | Python 3.12, FastAPI, SQLModel, SQLite |
+| LLM | `claude-haiku-4-5-20251001` (Clustering, Summaries, Digest) |
+| Frontend | React 19, Vite 8, Tailwind 4, TypeScript 6 |
+| Scheduler | systemd-Timer (Linux) bzw. LaunchAgent (macOS) |
 
 ## Schnellstart
 
 ```bash
 # 1. API-Key setzen
 cp .env.example .env
-nano .env   # ANTHROPIC_API_KEY=sk-ant-...
+# ANTHROPIC_API_KEY in .env eintragen
 
-# 2. Backend starten
+# 2. Backend starten (legt .venv an, installiert Deps, startet uvicorn)
 ./start.sh
 # → http://localhost:8000/docs
 
-# 3. Ersten Fetch manuell starten
-curl -X POST http://localhost:8000/api/fetch
+# 3. Frontend (separates Terminal)
+cd frontend
+npm install
+npm run dev
+# → http://localhost:5173 (Vite-Proxy /api → :8000)
 
-# Oder ohne Zusammenfassung (kein API-Key nötig):
-python scripts/fetch_news.py --no-summarize
+# 4. Ersten Fetch starten
+curl -X POST http://localhost:8000/api/fetch
+# Oder ohne Claude (Pipeline trocken):
+python scripts/fetch_news.py --no-summarize --no-digest
 ```
 
-## LaunchAgent einrichten (tägl. 07:00)
+## CLI
 
 ```bash
-cp scripts/at.worlddirect.kinews.fetch.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/at.worlddirect.kinews.fetch.plist
-
-# Sofort testen:
-launchctl start at.worlddirect.kinews.fetch
-
-# Logs:
-tail -f ~/Library/Logs/kinews_fetch.log
+python scripts/fetch_news.py                 # voller Lauf
+python scripts/fetch_news.py --no-summarize  # ohne Summaries
+python scripts/fetch_news.py --no-cluster    # ohne Clustering
+python scripts/fetch_news.py --no-digest     # ohne Tages-Digest
+python scripts/migrate_cluster.py --dry-run  # Bestandsdaten retro-clustern
 ```
 
-## API Übersicht
+## Scheduler
+
+**Linux (systemd):** units in `scripts/server/` — einmalig nach `/etc/systemd/system/` kopieren, `systemctl enable --now kinews-fetch.timer`. Default ist täglich 07:30 lokale Zeit.
+
+**macOS (LaunchAgent):** `cp scripts/at.worlddirect.kinews.fetch.plist ~/Library/LaunchAgents/ && launchctl load ~/Library/LaunchAgents/at.worlddirect.kinews.fetch.plist`. Default 07:00.
+
+## API
 
 | Methode | Pfad | Beschreibung |
 |---------|------|--------------|
 | GET | `/api/stories` | Stories mit Filtern: `tags`, `sources`, `date_from`, `date_to`, `search`, `sort`, `processed_only`, `limit`, `offset` |
-| GET | `/api/stories/{id}` | Einzelne Story inkl. zugeordneter Quellen |
-| POST | `/api/fetch` | Manueller Fetch + Cluster + Summarize |
+| GET | `/api/stories/{id}` | Einzelne Story inkl. Quellen |
+| POST | `/api/fetch` | Pipeline triggern: `?cluster=true&summarize=true&digest=true` |
 | GET | `/api/tags` | Verfügbare Tags |
 | GET | `/api/sources` | Konfigurierte Quellen |
-| GET | `/api/stats` | Statistiken (Stories, Artikel, Quellen) |
+| GET | `/api/stats` | Zähler: Articles, Stories, processed, unclustered |
+| GET | `/api/profile` | User-Profil (Single-Row, multi-user-ready) |
+| PUT | `/api/profile` | `name` und/oder `priority_prompt` updaten |
+| GET | `/api/digest/latest` | Aktuellster Digest mit hydratisierten Top-Stories |
+| GET | `/api/digest` | Digest-Verlauf (Liste der Summaries) |
+| POST | `/api/digest/regenerate` | Manueller Re-Generate (gleiches Window, neu kuratiert) |
+
+## Datenmodell
+
+```
+Story (Cluster)            Article (Quelle)         DailyDigest         UserProfile
+──────────────             ───────────────          ──────────          ────────────
+id                         id                       id                  id (=1)
+title_de                   url (unique)             user_profile_id     name
+summary_de                 title                    generated_at        priority_prompt
+tags_json                  source_name              window_start..end   updated_at
+source_count               story_id → Story.id      meta_summary_de
+is_processed                                        top_story_ids_json
+```
 
 ## Neue Quelle hinzufügen
 
@@ -67,16 +102,26 @@ RSS_FEEDS.append({
 ## Projektstruktur
 
 ```
-backend/          Python + FastAPI
-  fetcher/        Modulare Fetcher (rss, hackernews, reddit kommt)
-  summarizer.py   Claude API Integration
-  deduplicator.py Deduplizierungs-Logik
-scripts/          Cron-Script + LaunchAgent-Plist
-data/             SQLite-Datenbank
+backend/
+  app.py              FastAPI REST API
+  config.py           Settings, RSS_FEEDS, AVAILABLE_TAGS
+  db.py               SQLModel-Schema + Migration
+  fetcher/            RSS + Hacker News
+  deduplicator.py     URL + Hash + Fuzzy-Title
+  clusterer.py        Claude-basiertes Story-Clustering
+  summarizer.py       Claude-basierte Story-Summaries
+  digest_generator.py Claude-basierter Tages-Digest
+frontend/src/
+  App.tsx             View-Routing (Dashboard / Alle / Settings)
+  hooks/              useStories, useDigest, usePersistedView, …
+  components/         Dashboard, TopStoryCard, StoryCard, FilterBar, …
+scripts/
+  fetch_news.py       Pipeline-CLI
+  migrate_cluster.py  Retro-Clustering für Bestandsdaten
+  server/             systemd-Units + nginx-Config
+data/                 SQLite-DB (gitignored)
 ```
 
-## Roadmap
+## Lizenz
 
-- [ ] Phase 2: React-Frontend mit Filterpanel und collapsible Cards
-- [ ] Reddit-Fetcher
-- [ ] Weitere Themen: IT-Security, Marketing-News, Company-Radar
+MIT. Persönliches Projekt — Issues und PRs willkommen, aber keine SLA.
