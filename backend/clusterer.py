@@ -7,13 +7,14 @@ Batches up to BATCH_SIZE articles per call for cost efficiency.
 """
 import json
 import anthropic
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlmodel import Session
 
 from .config import settings
 from .db import Article, Story, engine, get_open_stories
 
 BATCH_SIZE = 80  # articles per Claude call
+STALE_ARTICLE_DAYS = 7  # articles older than this don't refresh story.last_updated
 
 _SYSTEM_PROMPT = """Du bist ein News-Clustering-Experte für KI-Nachrichten.
 
@@ -21,14 +22,22 @@ Aufgabe: Ordne jeden neuen Artikel einer bestehenden Story zu, oder eröffne ein
 
 Regeln:
 - Artikel über dasselbe Ereignis/Release/Thema → gleiche Story
-- Jedes ArXiv-Paper ist normalerweise eine eigene Story, außer ein News-Artikel berichtet direkt darüber
-- Story-Titel: kurz, auf Deutsch, max 7 Wörter (z.B. "GPT-5 Veröffentlichung", "Gemini 2.0 Flash Release")
-- story_id = null bedeutet: neue Story anlegen mit new_story_title
+- VERSIONSNUMMERN sind IMMER eigene Stories: GPT-5.4 ≠ GPT-5.5, Claude 4.6 ≠ Claude 4.7, Gemini 2.0 ≠ Gemini 2.5.
+  Vergleiche die Versionsnummer im Artikel-Titel mit der in der offenen Story. Bei abweichender Version: NEUE Story.
+- Verschiedene Releases desselben Herstellers (z.B. "Claude 4.7 Release" vs "Claude Security Beta") sind eigene Stories.
+- DATUMSCHECK: Wenn ein Artikel ein Datum (published_at) Wochen/Monate vor dem first_seen einer offenen Story hat, ist es vermutlich ein älterer Backfill und gehört NICHT zur aktuellen Story — leg eine neue an.
+- Jedes ArXiv-Paper ist normalerweise eine eigene Story, außer ein News-Artikel berichtet direkt darüber.
+- Story-Titel: kurz, auf Deutsch, max 7 Wörter (z.B. "GPT-5.5 Veröffentlichung", "Gemini 2.5 Flash Release"). Versionsnummern beibehalten.
+- story_id = null bedeutet: neue Story anlegen mit new_story_title.
 
 Antworte NUR als valides JSON-Array, kein Text davor/danach:
 [{"article_id": <int>, "story_id": <int_or_null>, "new_story_title": <string_or_null>}, ...]
 
 Jeder Artikel muss im Array vorkommen."""
+
+
+def _fmt_date(dt: datetime | None) -> str:
+    return dt.strftime("%Y-%m-%d") if dt else "?"
 
 
 def _call_claude(articles: list[Article], open_stories: list[Story]) -> list[dict]:
@@ -37,17 +46,17 @@ def _call_claude(articles: list[Article], open_stories: list[Story]) -> list[dic
     stories_block = "KEINE OFFENEN STORIES"
     if open_stories:
         stories_block = "\n".join(
-            f"{s.id} | {s.title_de}" for s in open_stories
+            f"{s.id} | {_fmt_date(s.first_seen)} | {s.title_de}" for s in open_stories
         )
 
     articles_block = "\n".join(
-        f"{a.id} | {a.title[:100]} | {a.source_name}"
+        f"{a.id} | {_fmt_date(a.published_at)} | {a.title[:100]} | {a.source_name}"
         for a in articles
     )
 
     user_msg = (
-        f"OFFENE STORIES (letzte 3 Tage):\nID | Titel\n{stories_block}\n\n"
-        f"NEUE ARTIKEL:\nID | Titel | Quelle\n{articles_block}"
+        f"OFFENE STORIES (letzte 3 Tage):\nID | first_seen | Titel\n{stories_block}\n\n"
+        f"NEUE ARTIKEL:\nID | published_at | Titel | Quelle\n{articles_block}"
     )
 
     response = client.messages.create(
@@ -82,8 +91,11 @@ def cluster_articles(articles: list[Article]) -> dict[int, int]:
 
     result: dict[int, int] = {}
 
+    stale_cutoff = datetime.utcnow() - timedelta(days=STALE_ARTICLE_DAYS)
+
     for i in range(0, len(articles), BATCH_SIZE):
         batch = articles[i: i + BATCH_SIZE]
+        batch_by_id = {a.id: a for a in batch}
 
         with Session(engine) as session:
             open_stories = get_open_stories(session, days=3)
@@ -100,10 +112,15 @@ def cluster_articles(articles: list[Article]) -> dict[int, int]:
                     continue
 
                 if story_id:
-                    # Update existing story's last_updated + source_count
+                    # Update existing story's source_count; refresh last_updated
+                    # only if the incoming article is itself fresh (avoids a years-old
+                    # backfill article from re-floating an old story into the digest).
                     story = session.get(Story, story_id)
                     if story:
-                        story.last_updated = datetime.utcnow()
+                        article = batch_by_id.get(article_id)
+                        article_pub = article.published_at if article else None
+                        if article_pub is None or article_pub >= stale_cutoff:
+                            story.last_updated = datetime.utcnow()
                         story.source_count += 1
                         session.add(story)
                         session.commit()

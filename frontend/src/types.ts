@@ -1,6 +1,7 @@
 export interface Story {
   id: number
   title_de: string
+  primary_title: string | null
   summary_de: string | null
   tags: string[]
   source_count: number

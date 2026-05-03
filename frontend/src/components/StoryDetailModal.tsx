@@ -91,7 +91,7 @@ export function StoryDetailModal({ storyId, onClose }: Props) {
               id="story-detail-title"
               className="text-xl font-bold text-slate-100 m-0 leading-snug"
             >
-              {detail.title_de}
+              {detail.primary_title || detail.title_de}
             </h2>
 
             {detail.summary_de && (

@@ -10,6 +10,7 @@ interface Props {
 export function TopStoryCard({ entry, onSelect }: Props) {
   const { rank, why, story } = entry
   const [showWhy, setShowWhy] = useState(false)
+  const headline = story.primary_title || story.title_de
 
   return (
     <article
@@ -22,7 +23,7 @@ export function TopStoryCard({ entry, onSelect }: Props) {
       }}
       tabIndex={0}
       role="button"
-      aria-label={`Story öffnen: ${story.title_de}`}
+      aria-label={`Story öffnen: ${headline}`}
       className="bg-slate-900 border border-slate-700/60 rounded-xl p-4 flex flex-col gap-2.5 hover:border-slate-600 cursor-pointer transition-colors focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30"
     >
       <div className="flex items-start gap-3">
@@ -33,7 +34,7 @@ export function TopStoryCard({ entry, onSelect }: Props) {
           {rank}
         </span>
         <h3 className="text-slate-100 font-semibold text-base leading-snug m-0 flex-1">
-          {story.title_de}
+          {headline}
         </h3>
       </div>
 

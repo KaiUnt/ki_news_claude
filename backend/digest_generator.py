@@ -10,10 +10,10 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 import anthropic
-from sqlmodel import Session, select, func
+from sqlmodel import Session, select, func, or_
 
 from .config import settings
-from .db import Story, DailyDigest, UserProfile, engine
+from .db import Article, Story, DailyDigest, UserProfile, engine
 
 
 _SYSTEM_PROMPT = """Du bist der News-Editor für ein persönliches KI-News-Dashboard.
@@ -21,7 +21,8 @@ _SYSTEM_PROMPT = """Du bist der News-Editor für ein persönliches KI-News-Dashb
 Aufgabe: Wähle aus den heutigen Stories die wichtigsten 5–7 aus und schreibe eine kurze Tageszusammenfassung auf Deutsch.
 
 Regeln:
-- Berücksichtige die User-Prioritäten (falls angegeben). Wenn keine User-Prioritäten gegeben sind, sortiere nach allgemeiner Wichtigkeit: Source-Count (mehrere Quellen = wichtig), Recency, Tag-Diversität.
+- Berücksichtige die User-Prioritäten (falls angegeben). Wenn keine User-Prioritäten gegeben sind, sortiere nach allgemeiner Wichtigkeit: Recency (latest_published_at = neuer ist besser), Source-Count (mehrere Quellen = wichtig), Tag-Diversität.
+- WICHTIG: Stories mit altem latest_published_at (Wochen/Monate zurück) NICHT in den Top auswählen, auch wenn sie technisch im Window liegen — bevorzuge die jüngsten Releases.
 - meta_summary_de: 2–3 Absätze, was heute in der KI-Welt passiert ist. Sachlich, kein Marketing-Sprech, kein "Heute ist..."-Geschwafel. Direkt einsteigen.
 - top_stories: 5–7 Stories. Mehr wenn der Tag viel Substanz hat, weniger wenn dünn. rank: 1 = wichtigste.
 - "why": 1 Satz, warum diese Story wichtig ist (besonders im Licht der User-Prioritäten).
@@ -55,11 +56,47 @@ def generate(reuse_last_window: bool = False) -> Optional[DailyDigest]:
         window_start = _compute_window_start(session, reuse_last_window)
         window_end = datetime.utcnow()
 
-        stories = list(session.exec(
-            select(Story)
-            .where(Story.last_updated >= window_start)
-            .where(Story.is_processed == True)
+        # Stories qualify for this digest only if they have at least one article
+        # with a recent publication date — prevents backfill mirrors from
+        # re-floating years-old reports into today's window.
+        recent_story_ids = list(session.exec(
+            select(Article.story_id)
+            .where(Article.story_id.is_not(None))
+            .where(func.coalesce(Article.published_at, Article.fetched_at) >= window_start)
+            .distinct()
         ).all())
+
+        latest_pub_by_story = dict(session.exec(
+            select(
+                Article.story_id,
+                func.max(func.coalesce(Article.published_at, Article.fetched_at)),
+            )
+            .where(Article.story_id.is_not(None))
+            .group_by(Article.story_id)
+        ).all())
+
+        if not recent_story_ids:
+            return None
+
+        story_query = (
+            select(Story)
+            .where(Story.id.in_(recent_story_ids))
+            .where(Story.is_processed == True)
+        )
+
+        # Each story may appear in at most one digest. On regenerate, also include
+        # stories already linked to the most recent digest (same window, re-curated).
+        if reuse_last_window:
+            last_digest_id = session.exec(
+                select(DailyDigest.id).order_by(DailyDigest.generated_at.desc()).limit(1)
+            ).first()
+            story_query = story_query.where(
+                or_(Story.first_digest_id.is_(None), Story.first_digest_id == last_digest_id)
+            )
+        else:
+            story_query = story_query.where(Story.first_digest_id.is_(None))
+
+        stories = list(session.exec(story_query).all())
 
         priority_prompt = profile.priority_prompt or ""
         profile_id = profile.id
@@ -74,7 +111,10 @@ def generate(reuse_last_window: bool = False) -> Optional[DailyDigest]:
             "summary_de": s.summary_de,
             "tags": s.tags,
             "source_count": s.source_count,
-            "last_updated": s.last_updated.isoformat() if s.last_updated else None,
+            "latest_published_at": (
+                latest_pub_by_story.get(s.id).isoformat()
+                if latest_pub_by_story.get(s.id) else None
+            ),
         }
         for s in stories
     ]
@@ -103,6 +143,17 @@ def generate(reuse_last_window: bool = False) -> Optional[DailyDigest]:
         session.add(digest)
         session.commit()
         session.refresh(digest)
+
+        # Mark each top story with its first digest appearance (Fix 4: one-shot)
+        for entry in result["top_stories"]:
+            sid = entry.get("story_id")
+            if not isinstance(sid, int):
+                continue
+            story = session.get(Story, sid)
+            if story and story.first_digest_id is None:
+                story.first_digest_id = digest.id
+                session.add(story)
+        session.commit()
 
     return digest
 

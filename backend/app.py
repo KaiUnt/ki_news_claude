@@ -33,10 +33,17 @@ def on_startup():
 
 # ── Serializers ───────────────────────────────────────────────────────────────
 
-def _story_to_dict(s: Story, sources: list[Article] | None = None) -> dict:
+def _story_to_dict(
+    s: Story,
+    sources: list[Article] | None = None,
+    primary_title: str | None = None,
+) -> dict:
+    if primary_title is None and sources:
+        primary_title = max(sources, key=lambda a: len(a.raw_content or "")).title
     d = {
         "id": s.id,
         "title_de": s.title_de,
+        "primary_title": primary_title,
         "summary_de": s.summary_de,
         "tags": s.tags,
         "source_count": s.source_count,
@@ -47,6 +54,24 @@ def _story_to_dict(s: Story, sources: list[Article] | None = None) -> dict:
     if sources is not None:
         d["sources"] = [_source_to_dict(a) for a in sources]
     return d
+
+
+def _batch_primary_titles(session: Session, story_ids: list[int]) -> dict[int, str]:
+    """Return {story_id: title_of_longest_raw_content_article} for the given stories.
+
+    Mirrors Summarizer._best_article_for_story logic so the displayed headline
+    matches the article that produced the German summary.
+    """
+    if not story_ids:
+        return {}
+    rows = session.exec(
+        select(Article.story_id, Article.title, Article.raw_content)
+        .where(Article.story_id.in_(story_ids))
+    ).all()
+    by_story: dict[int, list[tuple[str, int]]] = {}
+    for sid, title, raw in rows:
+        by_story.setdefault(sid, []).append((title, len(raw or "")))
+    return {sid: max(items, key=lambda x: x[1])[0] for sid, items in by_story.items()}
 
 
 def _source_to_dict(a: Article) -> dict:
@@ -131,11 +156,14 @@ def list_stories(
     total = len(stories)
     page = stories[offset: offset + limit]
 
+    with Session(engine) as session:
+        primaries = _batch_primary_titles(session, [s.id for s in page])
+
     return {
         "total": total,
         "offset": offset,
         "limit": limit,
-        "items": [_story_to_dict(s) for s in page],
+        "items": [_story_to_dict(s, primary_title=primaries.get(s.id)) for s in page],
     }
 
 
@@ -219,9 +247,11 @@ def get_latest_digest():
 
         story_ids = [t.get("story_id") for t in digest.top_stories if t.get("story_id")]
         story_by_id: dict[int, Story] = {}
+        primaries: dict[int, str] = {}
         if story_ids:
             stories = session.exec(select(Story).where(Story.id.in_(story_ids))).all()
             story_by_id = {s.id: s for s in stories}
+            primaries = _batch_primary_titles(session, story_ids)
 
         top_with_data = []
         for entry in digest.top_stories:
@@ -232,7 +262,7 @@ def get_latest_digest():
             top_with_data.append({
                 "rank": entry.get("rank"),
                 "why": entry.get("why"),
-                "story": _story_to_dict(story),
+                "story": _story_to_dict(story, primary_title=primaries.get(sid)),
             })
         top_with_data.sort(key=lambda x: x.get("rank") or 999)
 

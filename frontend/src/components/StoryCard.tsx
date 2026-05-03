@@ -17,6 +17,7 @@ interface Props {
 }
 
 export function StoryCard({ story, onSelect }: Props) {
+  const headline = story.primary_title || story.title_de
   return (
     <article
       onClick={() => onSelect(story.id)}
@@ -28,7 +29,7 @@ export function StoryCard({ story, onSelect }: Props) {
       }}
       tabIndex={0}
       role="button"
-      aria-label={`Story öffnen: ${story.title_de}`}
+      aria-label={`Story öffnen: ${headline}`}
       className="bg-slate-900 border border-slate-700/60 rounded-xl p-4 flex flex-col gap-3 hover:border-slate-600 cursor-pointer transition-colors focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30"
     >
       <div className="flex items-start justify-between gap-2">
@@ -41,7 +42,7 @@ export function StoryCard({ story, onSelect }: Props) {
       </div>
 
       <h2 className="text-slate-100 font-semibold text-base leading-snug m-0">
-        {story.title_de}
+        {headline}
       </h2>
 
       {story.summary_de && (
