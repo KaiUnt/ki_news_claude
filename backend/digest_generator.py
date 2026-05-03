@@ -139,7 +139,10 @@ def generate(reuse_last_window: bool = False) -> Optional[DailyDigest]:
     )
     digest.top_stories = result["top_stories"]
 
-    with Session(engine) as session:
+    # expire_on_commit=False keeps `digest` attributes loaded after the second
+    # commit below — otherwise marking stories with first_digest_id triggers an
+    # implicit expire on `digest` and the caller hits DetachedInstanceError.
+    with Session(engine, expire_on_commit=False) as session:
         session.add(digest)
         session.commit()
         session.refresh(digest)
