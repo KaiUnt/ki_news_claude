@@ -82,17 +82,26 @@ def generate(reuse_last_window: bool = False) -> Optional[DailyDigest]:
             select(Story)
             .where(Story.id.in_(recent_story_ids))
             .where(Story.is_processed == True)
+            # Exclude historic catch-all stories (often 20+ unrelated articles
+            # piled into a single "Sonstiges" bucket by older cluster runs).
+            .where(func.lower(Story.title_de) != "sonstiges")
         )
 
         # Each story may appear in at most one digest. On regenerate, also include
-        # stories already linked to the most recent digest (same window, re-curated).
+        # the exact stories that were in the last digest (regardless of when their
+        # first_digest_id was set), so the same pool gets re-curated.
         if reuse_last_window:
-            last_digest_id = session.exec(
-                select(DailyDigest.id).order_by(DailyDigest.generated_at.desc()).limit(1)
+            last_digest = session.exec(
+                select(DailyDigest).order_by(DailyDigest.generated_at.desc()).limit(1)
             ).first()
+            last_top_ids = {
+                t.get("story_id")
+                for t in (last_digest.top_stories if last_digest else [])
+                if isinstance(t.get("story_id"), int)
+            }
             story_query = story_query.where(
-                or_(Story.first_digest_id.is_(None), Story.first_digest_id == last_digest_id)
-            )
+                or_(Story.first_digest_id.is_(None), Story.id.in_(last_top_ids))
+            ) if last_top_ids else story_query.where(Story.first_digest_id.is_(None))
         else:
             story_query = story_query.where(Story.first_digest_id.is_(None))
 
