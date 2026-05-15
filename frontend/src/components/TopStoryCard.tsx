@@ -1,13 +1,15 @@
 import { useState } from 'react'
-import type { DigestTopStory } from '../types'
+import type { DigestTopStory, Story } from '../types'
 import { TagBadge } from './TagBadge'
+import { FavoriteButton } from './FavoriteButton'
 
 interface Props {
   entry: DigestTopStory
   onSelect: (id: number) => void
+  onToggleFavorite: (story: Story, next: boolean) => Promise<void>
 }
 
-export function TopStoryCard({ entry, onSelect }: Props) {
+export function TopStoryCard({ entry, onSelect, onToggleFavorite }: Props) {
   const { rank, why, story } = entry
   const [showWhy, setShowWhy] = useState(false)
   const headline = story.primary_title || story.title_de
@@ -36,6 +38,10 @@ export function TopStoryCard({ entry, onSelect }: Props) {
         <h3 className="text-slate-100 font-semibold text-base leading-snug m-0 flex-1">
           {headline}
         </h3>
+        <FavoriteButton
+          isFavorite={story.is_favorite}
+          onToggle={next => onToggleFavorite(story, next)}
+        />
       </div>
 
       {story.summary_de && (

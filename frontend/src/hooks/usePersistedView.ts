@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import type { View } from '../types'
 
 const STORAGE_KEY = 'kinews:view'
-const VALID: View[] = ['dashboard', 'all', 'settings']
+const VALID: View[] = ['dashboard', 'all', 'favorites', 'settings']
 
 export function usePersistedView(defaultView: View): [View, (v: View) => void] {
   const [view, setView] = useState<View>(() => {

@@ -1,6 +1,7 @@
 import json
 from datetime import datetime, timedelta
 from typing import Optional
+from sqlalchemy import UniqueConstraint
 from sqlmodel import SQLModel, Field, create_engine, Session, select, text, func
 from .config import settings
 
@@ -71,6 +72,18 @@ class DailyDigest(SQLModel, table=True):
     @top_stories.setter
     def top_stories(self, value: list[dict]) -> None:
         self.top_story_ids_json = json.dumps(value, ensure_ascii=False)
+
+
+class FavoriteStory(SQLModel, table=True):
+    """A story saved by a user for later reading."""
+    __table_args__ = (
+        UniqueConstraint("user_profile_id", "story_id", name="uq_favorite_story_user_story"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_profile_id: int = Field(foreign_key="userprofile.id", index=True)
+    story_id: int = Field(foreign_key="story.id", index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
 
 def _db_path() -> str:

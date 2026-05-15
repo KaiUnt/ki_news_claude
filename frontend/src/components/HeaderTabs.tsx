@@ -8,6 +8,7 @@ interface Props {
 const TABS: { id: View; label: string }[] = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'all',       label: 'Alle Stories' },
+  { id: 'favorites', label: 'Favoriten' },
   { id: 'settings',  label: 'Settings' },
 ]
 

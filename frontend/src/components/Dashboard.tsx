@@ -1,4 +1,4 @@
-import type { DigestLatest } from '../types'
+import type { DigestLatest, Story } from '../types'
 import { TopStoryCard } from './TopStoryCard'
 
 interface Props {
@@ -6,6 +6,7 @@ interface Props {
   loading: boolean
   error: string | null
   onSelectStory: (id: number) => void
+  onToggleFavorite: (story: Story, next: boolean) => Promise<void>
 }
 
 function formatGeneratedAt(iso: string): string {
@@ -15,7 +16,7 @@ function formatGeneratedAt(iso: string): string {
   })
 }
 
-export function Dashboard({ digest, loading, error, onSelectStory }: Props) {
+export function Dashboard({ digest, loading, error, onSelectStory, onToggleFavorite }: Props) {
   if (loading) {
     return (
       <div className="flex justify-center py-20">
@@ -72,6 +73,7 @@ export function Dashboard({ digest, loading, error, onSelectStory }: Props) {
                 key={entry.story.id}
                 entry={entry}
                 onSelect={onSelectStory}
+                onToggleFavorite={onToggleFavorite}
               />
             ))}
           </div>

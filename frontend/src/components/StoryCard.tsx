@@ -1,5 +1,6 @@
 import type { Story } from '../types'
 import { TagBadge } from './TagBadge'
+import { FavoriteButton } from './FavoriteButton'
 
 function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime()
@@ -14,9 +15,10 @@ function relativeTime(iso: string): string {
 interface Props {
   story: Story
   onSelect: (id: number) => void
+  onToggleFavorite: (story: Story, next: boolean) => Promise<void>
 }
 
-export function StoryCard({ story, onSelect }: Props) {
+export function StoryCard({ story, onSelect, onToggleFavorite }: Props) {
   const headline = story.primary_title || story.title_de
   return (
     <article
@@ -36,9 +38,15 @@ export function StoryCard({ story, onSelect }: Props) {
         <div className="flex flex-wrap gap-1">
           {story.tags.map(t => <TagBadge key={t} tag={t} />)}
         </div>
-        <span className="text-slate-500 text-xs whitespace-nowrap shrink-0 mt-0.5">
-          {relativeTime(story.last_updated)}
-        </span>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-slate-500 text-xs whitespace-nowrap">
+            {relativeTime(story.last_updated)}
+          </span>
+          <FavoriteButton
+            isFavorite={story.is_favorite}
+            onToggle={next => onToggleFavorite(story, next)}
+          />
+        </div>
       </div>
 
       <h2 className="text-slate-100 font-semibold text-base leading-snug m-0">

@@ -10,24 +10,40 @@ export function useDigest() {
 
   useEffect(() => {
     const ac = new AbortController()
-    setLoading(true)
-    setError(null)
+    queueMicrotask(() => {
+      if (ac.signal.aborted) return
+      setLoading(true)
+      setError(null)
 
-    fetchDigestLatest()
-      .then(data => {
-        if (!ac.signal.aborted) setDigest(data)
-      })
-      .catch(e => {
-        if (e.name !== 'AbortError') setError('Fehler beim Laden des Digest')
-      })
-      .finally(() => {
-        if (!ac.signal.aborted) setLoading(false)
-      })
+      fetchDigestLatest()
+        .then(data => {
+          if (!ac.signal.aborted) setDigest(data)
+        })
+        .catch(e => {
+          if (e.name !== 'AbortError') setError('Fehler beim Laden des Digest')
+        })
+        .finally(() => {
+          if (!ac.signal.aborted) setLoading(false)
+        })
+    })
 
     return () => ac.abort()
   }, [refreshKey])
 
   const refresh = useCallback(() => setRefreshKey(k => k + 1), [])
+  const setStoryFavorite = useCallback((storyId: number, isFavorite: boolean) => {
+    setDigest(prev => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        top_stories: prev.top_stories.map(entry => (
+          entry.story.id === storyId
+            ? { ...entry, story: { ...entry.story, is_favorite: isFavorite } }
+            : entry
+        )),
+      }
+    })
+  }, [])
 
-  return { digest, loading, error, refresh }
+  return { digest, loading, error, refresh, setStoryFavorite }
 }

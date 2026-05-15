@@ -18,12 +18,26 @@ export function StoryDetailModal({ storyId, onClose }: Props) {
   const [error, setError]     = useState<string | null>(null)
 
   useEffect(() => {
-    setLoading(true)
-    setError(null)
-    fetchStoryDetail(storyId)
-      .then(setDetail)
-      .catch(() => setError('Fehler beim Laden der Story'))
-      .finally(() => setLoading(false))
+    let active = true
+    queueMicrotask(() => {
+      if (!active) return
+      setLoading(true)
+      setError(null)
+      setDetail(null)
+      fetchStoryDetail(storyId)
+        .then(data => {
+          if (active) setDetail(data)
+        })
+        .catch(() => {
+          if (active) setError('Fehler beim Laden der Story')
+        })
+        .finally(() => {
+          if (active) setLoading(false)
+        })
+    })
+    return () => {
+      active = false
+    }
   }, [storyId])
 
   useEffect(() => {

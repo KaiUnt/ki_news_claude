@@ -1,11 +1,13 @@
-from datetime import datetime, date
+from datetime import datetime, date, time, timedelta, timezone
 from typing import Optional
+from dateutil import tz
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import select, Session
 from .db import (
-    Article, Story, UserProfile, DailyDigest, create_db_and_tables, engine,
+    Article, Story, UserProfile, DailyDigest, FavoriteStory, create_db_and_tables, engine,
     get_existing_urls, get_existing_hashes,
     get_unclustered_articles, get_pending_stories,
 )
@@ -17,6 +19,9 @@ from . import digest_generator
 from .config import AVAILABLE_TAGS, RSS_FEEDS
 
 app = FastAPI(title="KI-News Dashboard API", version="2.0.0")
+
+DEFAULT_PROFILE_ID = 1
+LOCAL_TZ = tz.gettz("Europe/Vienna") or timezone(timedelta(hours=1), "Europe/Vienna")
 
 app.add_middleware(
     CORSMiddleware,
@@ -37,6 +42,7 @@ def _story_to_dict(
     s: Story,
     sources: list[Article] | None = None,
     primary_title: str | None = None,
+    is_favorite: bool = False,
 ) -> dict:
     if primary_title is None and sources:
         primary_title = max(sources, key=lambda a: len(a.raw_content or "")).title
@@ -50,10 +56,21 @@ def _story_to_dict(
         "first_seen": s.first_seen.isoformat() if s.first_seen else None,
         "last_updated": s.last_updated.isoformat() if s.last_updated else None,
         "is_processed": s.is_processed,
+        "is_favorite": is_favorite,
     }
     if sources is not None:
         d["sources"] = [_source_to_dict(a) for a in sources]
     return d
+
+
+def _favorite_story_ids(session: Session, story_ids: list[int], user_profile_id: int = DEFAULT_PROFILE_ID) -> set[int]:
+    if not story_ids:
+        return set()
+    return set(session.exec(
+        select(FavoriteStory.story_id)
+        .where(FavoriteStory.user_profile_id == user_profile_id)
+        .where(FavoriteStory.story_id.in_(story_ids))
+    ).all())
 
 
 def _batch_primary_titles(session: Session, story_ids: list[int]) -> dict[int, str]:
@@ -72,6 +89,28 @@ def _batch_primary_titles(session: Session, story_ids: list[int]) -> dict[int, s
     for sid, title, raw in rows:
         by_story.setdefault(sid, []).append((title, len(raw or "")))
     return {sid: max(items, key=lambda x: x[1])[0] for sid, items in by_story.items()}
+
+
+def _utc_naive_to_local(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc).astimezone(LOCAL_TZ)
+    return dt.astimezone(LOCAL_TZ)
+
+
+def _week_bounds_local(dt: datetime) -> tuple[datetime, datetime]:
+    local = _utc_naive_to_local(dt)
+    week_start_date = local.date() - timedelta(days=local.weekday())
+    week_start = datetime.combine(week_start_date, time.min, tzinfo=LOCAL_TZ)
+    week_end = week_start + timedelta(days=6, hours=23, minutes=59, seconds=59)
+    return week_start, week_end
+
+
+def _week_label(week_start: datetime, week_end: datetime) -> str:
+    calendar_week = week_start.isocalendar().week
+    return (
+        f"KW {calendar_week}: "
+        f"{week_start.strftime('%d.%m.')} bis {week_end.strftime('%d.%m.%Y')}"
+    )
 
 
 def _source_to_dict(a: Article) -> dict:
@@ -156,14 +195,23 @@ def list_stories(
     total = len(stories)
     page = stories[offset: offset + limit]
 
+    page_ids = [s.id for s in page if s.id is not None]
     with Session(engine) as session:
-        primaries = _batch_primary_titles(session, [s.id for s in page])
+        primaries = _batch_primary_titles(session, page_ids)
+        favorite_ids = _favorite_story_ids(session, page_ids)
 
     return {
         "total": total,
         "offset": offset,
         "limit": limit,
-        "items": [_story_to_dict(s, primary_title=primaries.get(s.id)) for s in page],
+        "items": [
+            _story_to_dict(
+                s,
+                primary_title=primaries.get(s.id),
+                is_favorite=s.id in favorite_ids,
+            )
+            for s in page
+        ],
     }
 
 
@@ -177,7 +225,90 @@ def get_story(story_id: int):
             select(Article).where(Article.story_id == story_id)
         ).all()
         sources_sorted = sorted(sources, key=lambda a: a.published_at or datetime.min)
-    return _story_to_dict(story, sources=list(sources_sorted))
+        is_favorite = story_id in _favorite_story_ids(session, [story_id])
+    return _story_to_dict(story, sources=list(sources_sorted), is_favorite=is_favorite)
+
+
+@app.get("/api/favorites")
+def list_favorites():
+    with Session(engine) as session:
+        rows = session.exec(
+            select(FavoriteStory, Story)
+            .where(FavoriteStory.user_profile_id == DEFAULT_PROFILE_ID)
+            .where(FavoriteStory.story_id == Story.id)
+            .order_by(FavoriteStory.created_at.desc())
+        ).all()
+        story_ids = [story.id for _, story in rows if story.id is not None]
+        primaries = _batch_primary_titles(session, story_ids)
+
+    by_week: dict[str, dict] = {}
+    for favorite, story in rows:
+        week_start, week_end = _week_bounds_local(favorite.created_at)
+        key = week_start.date().isoformat()
+        if key not in by_week:
+            by_week[key] = {
+                "week_start": week_start.date().isoformat(),
+                "week_end": week_end.date().isoformat(),
+                "label": _week_label(week_start, week_end),
+                "items": [],
+            }
+        by_week[key]["items"].append({
+            "favorite_id": favorite.id,
+            "favorited_at": favorite.created_at.isoformat() if favorite.created_at else None,
+            "story": _story_to_dict(
+                story,
+                primary_title=primaries.get(story.id),
+                is_favorite=True,
+            ),
+        })
+
+    weeks = sorted(by_week.values(), key=lambda w: w["week_start"], reverse=True)
+    return {"weeks": weeks}
+
+
+@app.post("/api/favorites/{story_id}")
+def add_favorite(story_id: int):
+    with Session(engine) as session:
+        story = session.get(Story, story_id)
+        if not story:
+            raise HTTPException(status_code=404, detail="Story not found")
+
+        favorite = session.exec(
+            select(FavoriteStory)
+            .where(FavoriteStory.user_profile_id == DEFAULT_PROFILE_ID)
+            .where(FavoriteStory.story_id == story_id)
+        ).first()
+        if favorite is None:
+            favorite = FavoriteStory(user_profile_id=DEFAULT_PROFILE_ID, story_id=story_id)
+            session.add(favorite)
+            try:
+                session.commit()
+            except IntegrityError:
+                session.rollback()
+            else:
+                session.refresh(favorite)
+
+        primary = _batch_primary_titles(session, [story_id]).get(story_id)
+        return _story_to_dict(story, primary_title=primary, is_favorite=True)
+
+
+@app.delete("/api/favorites/{story_id}")
+def remove_favorite(story_id: int):
+    with Session(engine) as session:
+        story = session.get(Story, story_id)
+        if not story:
+            raise HTTPException(status_code=404, detail="Story not found")
+
+        favorite = session.exec(
+            select(FavoriteStory)
+            .where(FavoriteStory.user_profile_id == DEFAULT_PROFILE_ID)
+            .where(FavoriteStory.story_id == story_id)
+        ).first()
+        if favorite:
+            session.delete(favorite)
+            session.commit()
+
+    return {"ok": True, "story_id": story_id}
 
 
 # ── Metadata endpoints ────────────────────────────────────────────────────────
@@ -248,10 +379,12 @@ def get_latest_digest():
         story_ids = [t.get("story_id") for t in digest.top_stories if t.get("story_id")]
         story_by_id: dict[int, Story] = {}
         primaries: dict[int, str] = {}
+        favorite_ids: set[int] = set()
         if story_ids:
             stories = session.exec(select(Story).where(Story.id.in_(story_ids))).all()
             story_by_id = {s.id: s for s in stories}
             primaries = _batch_primary_titles(session, story_ids)
+            favorite_ids = _favorite_story_ids(session, story_ids)
 
         top_with_data = []
         for entry in digest.top_stories:
@@ -262,7 +395,11 @@ def get_latest_digest():
             top_with_data.append({
                 "rank": entry.get("rank"),
                 "why": entry.get("why"),
-                "story": _story_to_dict(story, primary_title=primaries.get(sid)),
+                "story": _story_to_dict(
+                    story,
+                    primary_title=primaries.get(sid),
+                    is_favorite=sid in favorite_ids,
+                ),
             })
         top_with_data.sort(key=lambda x: x.get("rank") or 999)
 

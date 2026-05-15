@@ -1,6 +1,6 @@
 import type {
   StoriesResponse, StoryDetail, SourceConfig, Filters,
-  DigestLatest, DigestSummary, UserProfile,
+  DigestLatest, DigestSummary, UserProfile, FavoritesResponse, Story,
 } from './types'
 
 const BASE = '/api'
@@ -95,4 +95,21 @@ export async function updateProfile(
   })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.json()
+}
+
+export async function fetchFavorites(): Promise<FavoritesResponse> {
+  const res = await fetch(`${BASE}/favorites`)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
+export async function addFavorite(storyId: number): Promise<Story> {
+  const res = await fetch(`${BASE}/favorites/${storyId}`, { method: 'POST' })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
+export async function removeFavorite(storyId: number): Promise<void> {
+  const res = await fetch(`${BASE}/favorites/${storyId}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
 }

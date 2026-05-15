@@ -16,21 +16,24 @@ export function useStories(filters: Filters) {
   // AbortController guards against stale responses when filters change rapidly.
   useEffect(() => {
     const ac = new AbortController()
-    setLoading(true)
-    setError(null)
+    queueMicrotask(() => {
+      if (ac.signal.aborted) return
+      setLoading(true)
+      setError(null)
 
-    fetchStories(filters, 0, PAGE_SIZE, ac.signal)
-      .then(data => {
-        setTotal(data.total)
-        setStories(data.items)
-        offsetRef.current = data.items.length
-      })
-      .catch(e => {
-        if (e.name !== 'AbortError') setError('Fehler beim Laden der Stories')
-      })
-      .finally(() => {
-        if (!ac.signal.aborted) setLoading(false)
-      })
+      fetchStories(filters, 0, PAGE_SIZE, ac.signal)
+        .then(data => {
+          setTotal(data.total)
+          setStories(data.items)
+          offsetRef.current = data.items.length
+        })
+        .catch(e => {
+          if (e.name !== 'AbortError') setError('Fehler beim Laden der Stories')
+        })
+        .finally(() => {
+          if (!ac.signal.aborted) setLoading(false)
+        })
+    })
 
     return () => ac.abort()
   }, [filters, refreshKey])
@@ -48,9 +51,14 @@ export function useStories(filters: Filters) {
   }, [filters, loadingMore, stories.length, total])
 
   const refresh = useCallback(() => setRefreshKey(k => k + 1), [])
+  const setStoryFavorite = useCallback((storyId: number, isFavorite: boolean) => {
+    setStories(prev => prev.map(story => (
+      story.id === storyId ? { ...story, is_favorite: isFavorite } : story
+    )))
+  }, [])
 
   return {
-    stories, total, loading, loadingMore, error, loadMore, refresh,
+    stories, total, loading, loadingMore, error, loadMore, refresh, setStoryFavorite,
     hasMore: stories.length < total,
   }
 }

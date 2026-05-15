@@ -5,12 +5,14 @@ import { StoryDetailModal } from './components/StoryDetailModal'
 import { HeaderTabs } from './components/HeaderTabs'
 import { Dashboard } from './components/Dashboard'
 import { Settings } from './components/Settings'
+import { Favorites } from './components/Favorites'
 import { useStories } from './hooks/useStories'
 import { useDigest } from './hooks/useDigest'
+import { useFavorites } from './hooks/useFavorites'
 import { usePersistedFilters } from './hooks/usePersistedFilters'
 import { usePersistedView } from './hooks/usePersistedView'
-import { fetchStats, triggerFetch } from './api'
-import type { Filters } from './types'
+import { addFavorite, fetchStats, removeFavorite, triggerFetch } from './api'
+import type { Filters, Story } from './types'
 
 const DEFAULT_FILTERS: Filters = {
   tags: [],
@@ -27,9 +29,11 @@ export default function App() {
   const [stats, setStats]                     = useState<{ total_stories: number; total_articles: number } | null>(null)
   const [refreshing, setRefreshing]           = useState(false)
   const [selectedStoryId, setSelectedStoryId] = useState<number | null>(null)
+  const [favoriteRefreshKey, setFavoriteRefreshKey] = useState(0)
 
   const stories = useStories(filters)
   const digest  = useDigest()
+  const favorites = useFavorites(view === 'favorites', favoriteRefreshKey)
 
   useEffect(() => {
     fetchStats().then(setStats).catch(() => {})
@@ -49,6 +53,18 @@ export default function App() {
     } finally {
       setRefreshing(false)
     }
+  }
+
+  async function handleToggleFavorite(story: Story, next: boolean) {
+    if (next) {
+      await addFavorite(story.id)
+    } else {
+      await removeFavorite(story.id)
+    }
+    stories.setStoryFavorite(story.id, next)
+    digest.setStoryFavorite(story.id, next)
+    favorites.setStoryFavorite(story.id, next)
+    setFavoriteRefreshKey(k => k + 1)
   }
 
   return (
@@ -111,6 +127,17 @@ export default function App() {
             loading={digest.loading}
             error={digest.error}
             onSelectStory={setSelectedStoryId}
+            onToggleFavorite={handleToggleFavorite}
+          />
+        )}
+
+        {view === 'favorites' && (
+          <Favorites
+            weeks={favorites.weeks}
+            loading={favorites.loading}
+            error={favorites.error}
+            onSelectStory={setSelectedStoryId}
+            onToggleFavorite={handleToggleFavorite}
           />
         )}
 
@@ -140,7 +167,12 @@ export default function App() {
             {!stories.loading && stories.stories.length > 0 && (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {stories.stories.map(story => (
-                  <StoryCard key={story.id} story={story} onSelect={setSelectedStoryId} />
+                  <StoryCard
+                    key={story.id}
+                    story={story}
+                    onSelect={setSelectedStoryId}
+                    onToggleFavorite={handleToggleFavorite}
+                  />
                 ))}
               </div>
             )}

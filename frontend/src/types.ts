@@ -8,6 +8,7 @@ export interface Story {
   first_seen: string
   last_updated: string
   is_processed: boolean
+  is_favorite: boolean
 }
 
 export interface Source {
@@ -47,7 +48,7 @@ export interface Filters {
   sort: SortOrder
 }
 
-export type View = 'dashboard' | 'all' | 'settings'
+export type View = 'dashboard' | 'all' | 'favorites' | 'settings'
 
 export interface DigestTopStory {
   rank: number
@@ -81,4 +82,21 @@ export interface UserProfile {
   name: string
   priority_prompt: string
   updated_at: string
+}
+
+export interface FavoriteItem {
+  favorite_id: number
+  favorited_at: string
+  story: Story
+}
+
+export interface FavoriteWeek {
+  week_start: string
+  week_end: string
+  label: string
+  items: FavoriteItem[]
+}
+
+export interface FavoritesResponse {
+  weeks: FavoriteWeek[]
 }
