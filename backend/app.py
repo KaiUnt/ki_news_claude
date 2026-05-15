@@ -16,7 +16,8 @@ from .deduplicator import deduplicate, content_hash
 from .clusterer import cluster_articles
 from .summarizer import Summarizer
 from . import digest_generator
-from .config import AVAILABLE_TAGS, RSS_FEEDS
+from .config import AVAILABLE_TAGS
+from .source_catalog import list_source_configs, story_signals_for_source_names
 
 app = FastAPI(title="KI-News Dashboard API", version="2.0.0")
 
@@ -41,11 +42,13 @@ def on_startup():
 def _story_to_dict(
     s: Story,
     sources: list[Article] | None = None,
+    include_sources: bool = False,
     primary_title: str | None = None,
     is_favorite: bool = False,
 ) -> dict:
     if primary_title is None and sources:
         primary_title = max(sources, key=lambda a: len(a.raw_content or "")).title
+    signals = _story_signals(sources or [])
     d = {
         "id": s.id,
         "title_de": s.title_de,
@@ -57,8 +60,9 @@ def _story_to_dict(
         "last_updated": s.last_updated.isoformat() if s.last_updated else None,
         "is_processed": s.is_processed,
         "is_favorite": is_favorite,
+        **signals,
     }
-    if sources is not None:
+    if include_sources and sources is not None:
         d["sources"] = [_source_to_dict(a) for a in sources]
     return d
 
@@ -89,6 +93,24 @@ def _batch_primary_titles(session: Session, story_ids: list[int]) -> dict[int, s
     for sid, title, raw in rows:
         by_story.setdefault(sid, []).append((title, len(raw or "")))
     return {sid: max(items, key=lambda x: x[1])[0] for sid, items in by_story.items()}
+
+
+def _batch_story_articles(session: Session, story_ids: list[int]) -> dict[int, list[Article]]:
+    if not story_ids:
+        return {}
+    rows = session.exec(
+        select(Article).where(Article.story_id.in_(story_ids))
+    ).all()
+    grouped: dict[int, list[Article]] = {}
+    for article in rows:
+        if article.story_id is None:
+            continue
+        grouped.setdefault(article.story_id, []).append(article)
+    return grouped
+
+
+def _story_signals(sources: list[Article]) -> dict:
+    return story_signals_for_source_names([article.source_name for article in sources])
 
 
 def _utc_naive_to_local(dt: datetime) -> datetime:
@@ -144,6 +166,8 @@ class ProfileUpdate(BaseModel):
 def list_stories(
     tags: Optional[str] = Query(None, description="Comma-separated tag filter"),
     sources: Optional[str] = Query(None, description="Filter by source_name (any article in story)"),
+    section: Optional[str] = Query(None, pattern="^(general|research)$"),
+    story_kind: Optional[str] = Query(None, pattern="^(general|research|paper)$"),
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
     search: Optional[str] = Query(None),
@@ -186,6 +210,24 @@ def list_stories(
                     filtered.append(story)
         stories = filtered
 
+    source_map: dict[int, list[Article]] = {}
+    story_ids = [s.id for s in stories if s.id is not None]
+    if story_ids:
+        with Session(engine) as session:
+            source_map = _batch_story_articles(session, story_ids)
+
+    if section or story_kind:
+        filtered = []
+        for story in stories:
+            story_sources = source_map.get(story.id, [])
+            signals = _story_signals(story_sources)
+            if section and signals["section"] != section:
+                continue
+            if story_kind and signals["story_kind"] != story_kind:
+                continue
+            filtered.append(story)
+        stories = filtered
+
     reverse = sort == "date_desc"
     stories.sort(
         key=lambda s: s.last_updated or s.first_seen or datetime.min,
@@ -199,6 +241,7 @@ def list_stories(
     with Session(engine) as session:
         primaries = _batch_primary_titles(session, page_ids)
         favorite_ids = _favorite_story_ids(session, page_ids)
+        page_source_map = _batch_story_articles(session, page_ids)
 
     return {
         "total": total,
@@ -207,6 +250,7 @@ def list_stories(
         "items": [
             _story_to_dict(
                 s,
+                sources=page_source_map.get(s.id, []),
                 primary_title=primaries.get(s.id),
                 is_favorite=s.id in favorite_ids,
             )
@@ -226,7 +270,12 @@ def get_story(story_id: int):
         ).all()
         sources_sorted = sorted(sources, key=lambda a: a.published_at or datetime.min)
         is_favorite = story_id in _favorite_story_ids(session, [story_id])
-    return _story_to_dict(story, sources=list(sources_sorted), is_favorite=is_favorite)
+    return _story_to_dict(
+        story,
+        sources=list(sources_sorted),
+        include_sources=True,
+        is_favorite=is_favorite,
+    )
 
 
 @app.get("/api/favorites")
@@ -240,6 +289,7 @@ def list_favorites():
         ).all()
         story_ids = [story.id for _, story in rows if story.id is not None]
         primaries = _batch_primary_titles(session, story_ids)
+        source_map = _batch_story_articles(session, story_ids)
 
     by_week: dict[str, dict] = {}
     for favorite, story in rows:
@@ -255,12 +305,13 @@ def list_favorites():
         by_week[key]["items"].append({
             "favorite_id": favorite.id,
             "favorited_at": favorite.created_at.isoformat() if favorite.created_at else None,
-            "story": _story_to_dict(
-                story,
-                primary_title=primaries.get(story.id),
-                is_favorite=True,
-            ),
-        })
+                "story": _story_to_dict(
+                    story,
+                    sources=source_map.get(story.id, []),
+                    primary_title=primaries.get(story.id),
+                    is_favorite=True,
+                ),
+            })
 
     weeks = sorted(by_week.values(), key=lambda w: w["week_start"], reverse=True)
     return {"weeks": weeks}
@@ -289,7 +340,13 @@ def add_favorite(story_id: int):
                 session.refresh(favorite)
 
         primary = _batch_primary_titles(session, [story_id]).get(story_id)
-        return _story_to_dict(story, primary_title=primary, is_favorite=True)
+        source_map = _batch_story_articles(session, [story_id])
+        return _story_to_dict(
+            story,
+            sources=source_map.get(story_id, []),
+            primary_title=primary,
+            is_favorite=True,
+        )
 
 
 @app.delete("/api/favorites/{story_id}")
@@ -320,9 +377,7 @@ def list_tags():
 
 @app.get("/api/sources")
 def list_sources():
-    sources = [{"name": f["name"], "url": f["url"], "type": "rss"} for f in RSS_FEEDS]
-    sources.append({"name": "Hacker News", "url": "https://news.ycombinator.com", "type": "hackernews"})
-    return {"sources": sources}
+    return {"sources": list_source_configs()}
 
 
 # ── Profile endpoints ─────────────────────────────────────────────────────────
@@ -385,6 +440,9 @@ def get_latest_digest():
             story_by_id = {s.id: s for s in stories}
             primaries = _batch_primary_titles(session, story_ids)
             favorite_ids = _favorite_story_ids(session, story_ids)
+            source_map = _batch_story_articles(session, story_ids)
+        else:
+            source_map = {}
 
         top_with_data = []
         for entry in digest.top_stories:
@@ -397,6 +455,7 @@ def get_latest_digest():
                 "why": entry.get("why"),
                 "story": _story_to_dict(
                     story,
+                    sources=source_map.get(sid, []),
                     primary_title=primaries.get(sid),
                     is_favorite=sid in favorite_ids,
                 ),

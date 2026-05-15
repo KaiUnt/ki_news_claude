@@ -1,15 +1,22 @@
 import type {
   StoriesResponse, StoryDetail, SourceConfig, Filters,
   DigestLatest, DigestSummary, UserProfile, FavoritesResponse, Story,
+  StoryKind, StorySection,
 } from './types'
 
 const BASE = '/api'
+
+export interface FetchStoriesOptions {
+  section?: StorySection
+  storyKind?: StoryKind
+}
 
 export async function fetchStories(
   filters: Filters,
   offset = 0,
   limit = 30,
   signal?: AbortSignal,
+  options: FetchStoriesOptions = {},
 ): Promise<StoriesResponse> {
   const params = new URLSearchParams()
   if (filters.tags.length)    params.set('tags', filters.tags.join(','))
@@ -17,6 +24,8 @@ export async function fetchStories(
   if (filters.dateFrom)       params.set('date_from', filters.dateFrom)
   if (filters.dateTo)         params.set('date_to', filters.dateTo)
   if (filters.search)         params.set('search', filters.search)
+  if (options.section)        params.set('section', options.section)
+  if (options.storyKind)      params.set('story_kind', options.storyKind)
   params.set('sort', filters.sort)
   params.set('limit', String(limit))
   params.set('offset', String(offset))

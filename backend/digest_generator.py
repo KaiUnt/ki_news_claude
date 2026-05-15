@@ -14,6 +14,7 @@ from sqlmodel import Session, select, func, or_
 
 from .config import settings
 from .db import Article, Story, DailyDigest, UserProfile, engine
+from .source_catalog import story_signals_for_source_names
 
 
 _SYSTEM_PROMPT = """Du bist der News-Editor für ein persönliches KI-News-Dashboard.
@@ -106,6 +107,17 @@ def generate(reuse_last_window: bool = False) -> Optional[DailyDigest]:
             story_query = story_query.where(Story.first_digest_id.is_(None))
 
         stories = list(session.exec(story_query).all())
+        story_ids = [story.id for story in stories if story.id is not None]
+        source_names_by_story: dict[int, list[str]] = {}
+        if story_ids:
+            article_rows = session.exec(
+                select(Article.story_id, Article.source_name)
+                .where(Article.story_id.in_(story_ids))
+            ).all()
+            for story_id, source_name in article_rows:
+                if story_id is None:
+                    continue
+                source_names_by_story.setdefault(story_id, []).append(source_name)
 
         priority_prompt = profile.priority_prompt or ""
         profile_id = profile.id
@@ -124,6 +136,7 @@ def generate(reuse_last_window: bool = False) -> Optional[DailyDigest]:
                 latest_pub_by_story.get(s.id).isoformat()
                 if latest_pub_by_story.get(s.id) else None
             ),
+            **story_signals_for_source_names(source_names_by_story.get(s.id, [])),
         }
         for s in stories
     ]

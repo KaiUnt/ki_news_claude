@@ -8,6 +8,7 @@ import { Settings } from './components/Settings'
 import { Favorites } from './components/Favorites'
 import { useStories } from './hooks/useStories'
 import { useDigest } from './hooks/useDigest'
+import { useDashboardStories } from './hooks/useDashboardStories'
 import { useFavorites } from './hooks/useFavorites'
 import { usePersistedFilters } from './hooks/usePersistedFilters'
 import { usePersistedView } from './hooks/usePersistedView'
@@ -30,9 +31,12 @@ export default function App() {
   const [refreshing, setRefreshing]           = useState(false)
   const [selectedStoryId, setSelectedStoryId] = useState<number | null>(null)
   const [favoriteRefreshKey, setFavoriteRefreshKey] = useState(0)
+  const [dashboardRefreshKey, setDashboardRefreshKey] = useState(0)
 
   const stories = useStories(filters)
   const digest  = useDigest()
+  const researchStories = useDashboardStories('research', view === 'dashboard', dashboardRefreshKey)
+  const paperStories = useDashboardStories('paper', view === 'dashboard', dashboardRefreshKey)
   const favorites = useFavorites(view === 'favorites', favoriteRefreshKey)
 
   useEffect(() => {
@@ -46,6 +50,7 @@ export default function App() {
       await triggerFetch()
       stories.refresh()
       digest.refresh()
+      setDashboardRefreshKey(k => k + 1)
       const s = await fetchStats()
       setStats(s)
     } catch {
@@ -63,6 +68,8 @@ export default function App() {
     }
     stories.setStoryFavorite(story.id, next)
     digest.setStoryFavorite(story.id, next)
+    researchStories.setStoryFavorite(story.id, next)
+    paperStories.setStoryFavorite(story.id, next)
     favorites.setStoryFavorite(story.id, next)
     setFavoriteRefreshKey(k => k + 1)
   }
@@ -126,6 +133,12 @@ export default function App() {
             digest={digest.digest}
             loading={digest.loading}
             error={digest.error}
+            researchStories={researchStories.stories}
+            researchLoading={researchStories.loading}
+            researchError={researchStories.error}
+            paperStories={paperStories.stories}
+            paperLoading={paperStories.loading}
+            paperError={paperStories.error}
             onSelectStory={setSelectedStoryId}
             onToggleFavorite={handleToggleFavorite}
           />

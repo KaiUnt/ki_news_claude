@@ -149,6 +149,11 @@ class Settings:
     max_articles_per_fetch: int = int(os.getenv("MAX_ARTICLES_PER_FETCH", "100"))
     dedup_title_threshold: float = float(os.getenv("DEDUP_TITLE_THRESHOLD", "0.85"))
     content_max_chars: int = 3000
+    hackernews_max_items: int = int(os.getenv("HN_MAX_ITEMS", "30"))
+    hackernews_days_back: int = int(os.getenv("HN_DAYS_BACK", "1"))
+    hackernews_fetch_multiplier: int = int(os.getenv("HN_FETCH_MULTIPLIER", "4"))
+    hackernews_min_points: int = int(os.getenv("HN_MIN_POINTS", "3"))
+    hackernews_min_comments: int = int(os.getenv("HN_MIN_COMMENTS", "1"))
 
 
 settings = Settings()
