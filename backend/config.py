@@ -62,15 +62,25 @@ RSS_FEEDS = [
         "tag_hint": "Tools & Produkte",
     },
     {
-        "name": "Microsoft Power Platform Blog",
-        "url": "https://powerautomate.microsoft.com/en-us/blog/feed/",
-        "tag_hint": "Tools & Produkte",
+        "name": "Anthropic Research",
+        "url": "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_anthropic_research.xml",
+        "tag_hint": "Forschung / Paper",
+    },
+    {
+        "name": "Anthropic Engineering",
+        "url": "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_anthropic_engineering.xml",
+        "tag_hint": "Technik & Infrastruktur",
     },
     # ── Community & Open Source ────────────────────────────────────────────────
     {
         "name": "HuggingFace Blog",
         "url": "https://huggingface.co/blog/feed.xml",
         "tag_hint": "Tools & Produkte",
+    },
+    {
+        "name": "HuggingFace Daily Papers",
+        "url": "https://papers.takara.ai/api/feed",
+        "tag_hint": "Forschung / Paper",
     },
     {
         "name": "ArXiv cs.AI",
@@ -94,11 +104,6 @@ RSS_FEEDS = [
         "tag_hint": "Neue Modelle",
     },
     {
-        "name": "The Verge",
-        "url": "https://www.theverge.com/rss/index.xml",
-        "tag_hint": "Neue Modelle",
-    },
-    {
         "name": "VentureBeat AI",
         "url": "https://venturebeat.com/category/ai/feed/",
         "tag_hint": "Kosten & Business",
@@ -111,11 +116,6 @@ RSS_FEEDS = [
     {
         "name": "Wired AI",
         "url": "https://www.wired.com/feed/tag/ai/latest/rss",
-        "tag_hint": "Technik & Infrastruktur",
-    },
-    {
-        "name": "Ars Technica",
-        "url": "https://feeds.arstechnica.com/arstechnica/index",
         "tag_hint": "Technik & Infrastruktur",
     },
     {
@@ -132,6 +132,37 @@ RSS_FEEDS = [
         "name": "Heise KI",
         "url": "https://www.heise.de/thema/Kuenstliche-Intelligenz.xml",
         "tag_hint": "Neue Modelle",
+    },
+    {
+        "name": "Golem KI",
+        "url": "https://rss.golem.de/rss.php?feed=RSS2.0&ressort=ki",
+        "tag_hint": "Neue Modelle",
+    },
+    {
+        "name": "t3n KI",
+        "url": "https://t3n.de/tag/kuenstliche-intelligenz/rss.xml",
+        "tag_hint": "Neue Modelle",
+    },
+    # ── Newsletter & Individuelle Stimmen (Substack/Atom) ──────────────────────
+    {
+        "name": "Simon Willison",
+        "url": "https://simonwillison.net/atom/everything/",
+        "tag_hint": "Tools & Produkte",
+    },
+    {
+        "name": "Interconnects (Nathan Lambert)",
+        "url": "https://www.interconnects.ai/feed",
+        "tag_hint": "Forschung / Paper",
+    },
+    {
+        "name": "Latent Space (Swyx)",
+        "url": "https://www.latent.space/feed",
+        "tag_hint": "Tools & Produkte",
+    },
+    {
+        "name": "Ahead of AI (Raschka)",
+        "url": "https://magazine.sebastianraschka.com/feed",
+        "tag_hint": "Forschung / Paper",
     },
     # ── Regulierung & Policy ───────────────────────────────────────────────────
     {
