@@ -48,7 +48,7 @@ def normalize_tags(tags: list[str]) -> list[str]:
     """Translate legacy tag names to the new prefixed schema.
 
     Already-prefixed tags pass through unchanged. Unknown legacy strings drop out.
-    Used at read time so existing stories stay filterable without re-tagging.
+    Applied at read time so existing stories stay filterable without re-tagging.
     """
     result: list[str] = []
     for t in tags:
@@ -59,6 +59,26 @@ def normalize_tags(tags: list[str]) -> list[str]:
         if mapped:
             result.append(mapped)
     return result
+
+
+def split_tags(tags: list[str]) -> dict:
+    """Split a normalized tag list into its three axes.
+
+    Legacy-mapped stories may have >1 type-tag (because the old 7er-list allowed
+    multiple type-ish tags per story); we keep all of them as `types` plural so
+    Claude sees the ambiguity rather than us picking one arbitrarily.
+    """
+    types: list[str] = []
+    domains: list[str] = []
+    flags: list[str] = []
+    for t in normalize_tags(tags):
+        if t.startswith("type:"):
+            types.append(t[len("type:"):])
+        elif t.startswith("domain:"):
+            domains.append(t[len("domain:"):])
+        elif t.startswith("flag:"):
+            flags.append(t[len("flag:"):])
+    return {"types": types, "domains": domains, "flags": flags}
 
 RSS_FEEDS = [
     # ── KI-Labs & Unternehmen ──────────────────────────────────────────────────

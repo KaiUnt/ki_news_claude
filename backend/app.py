@@ -9,7 +9,7 @@ from sqlmodel import select, Session
 from .db import (
     Article, Story, UserProfile, DailyDigest, FavoriteStory, create_db_and_tables, engine,
     get_existing_urls, get_existing_hashes,
-    get_unclustered_articles, get_pending_stories,
+    get_unclustered_articles,
 )
 from .fetcher import RSSFetcher, HackerNewsFetcher, RawArticle
 from .deduplicator import deduplicate, content_hash
@@ -189,7 +189,22 @@ def list_stories(
 
     if tags:
         tag_list = [t.strip() for t in tags.split(",") if t.strip()]
-        stories = [s for s in stories if any(t in normalize_tags(s.tags) for t in tag_list)]
+        # AND across axes, OR within: a story must hit at least one selected
+        # tag in *every* axis the user filtered on. E.g. picking type:release +
+        # type:forschung + domain:coding requires (release OR forschung) AND coding.
+        tags_by_axis: dict[str, list[str]] = {}
+        for t in tag_list:
+            axis = t.split(":", 1)[0] if ":" in t else "_legacy"
+            tags_by_axis.setdefault(axis, []).append(t)
+
+        def _matches_all_axes(story_tags: list[str]) -> bool:
+            normalized = normalize_tags(story_tags)
+            return all(
+                any(t in normalized for t in axis_tags)
+                for axis_tags in tags_by_axis.values()
+            )
+
+        stories = [s for s in stories if _matches_all_axes(s.tags)]
 
     if exclude_tags:
         excluded = {t.strip() for t in exclude_tags.split(",") if t.strip()}
@@ -214,13 +229,10 @@ def list_stories(
                     filtered.append(story)
         stories = filtered
 
-    source_map: dict[int, list[Article]] = {}
-    story_ids = [s.id for s in stories if s.id is not None]
-    if story_ids:
-        with Session(engine) as session:
-            source_map = _batch_story_articles(session, story_ids)
-
     if story_kind:
+        story_ids = [s.id for s in stories if s.id is not None]
+        with Session(engine) as session:
+            source_map = _batch_story_articles(session, story_ids) if story_ids else {}
         filtered = []
         for story in stories:
             story_sources = source_map.get(story.id, [])

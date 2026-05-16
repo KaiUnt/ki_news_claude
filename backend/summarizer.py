@@ -54,13 +54,12 @@ Regeln:
 - summary_de: Sachlich, max 3 Sätze, kein Marketing-Sprech.
 - type: Wenn unsicher, wähle den dominantesten Aspekt der Story.
 - domains: Wenn keine klare Domain passt, ["sonstige"].
-- flags: Nur setzen wenn klar zutreffend. Leeres Array ist OK.
-- Falls die Story keinen KI-Bezug hat: type="demo", domains=["sonstige"], flags=[]."""
+- flags: Nur setzen wenn klar zutreffend. Leeres Array ist OK."""
 
 
 _GENERAL_SYSTEM_PROMPT = _build_general_prompt()
 
-_PAPER_SYSTEM_PROMPT = """Du fasst ArXiv-Papers für ein KI-News-Dashboard auf Deutsch zusammen.
+_PAPER_SYSTEM_PROMPT = """Du fasst wissenschaftliche Papers (ArXiv, HuggingFace Daily Papers) für ein KI-News-Dashboard auf Deutsch zusammen.
 
 Antworte ausschließlich als gültiges JSON (kein Markdown):
 {

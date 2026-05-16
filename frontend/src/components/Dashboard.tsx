@@ -123,7 +123,7 @@ export function Dashboard({
                 Forschungs-News
               </h2>
               <span className="text-xs text-slate-500">
-                Wichtige Research-Updates und Lab-News
+                Stories die inhaltlich als Forschung klassifiziert wurden
               </span>
             </div>
 
@@ -159,7 +159,7 @@ export function Dashboard({
                 Paper-Stream
               </h2>
               <span className="text-xs text-slate-500">
-                Reine Paper-Stories aus den ArXiv-Feeds
+                Stories aus reinen Paper-Quellen (ArXiv, HuggingFace Daily Papers)
               </span>
             </div>
 

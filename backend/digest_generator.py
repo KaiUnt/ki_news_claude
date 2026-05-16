@@ -12,7 +12,7 @@ from typing import Optional
 import anthropic
 from sqlmodel import Session, select, func, or_
 
-from .config import settings, normalize_tags
+from .config import settings, split_tags
 from .db import Article, Story, DailyDigest, UserProfile, engine
 from .source_catalog import story_signals_for_source_names
 
@@ -21,8 +21,13 @@ _SYSTEM_PROMPT = """Du bist der News-Editor für ein persönliches KI-News-Dashb
 
 Aufgabe: Wähle aus den heutigen Stories die wichtigsten 5–7 aus und schreibe eine kurze Tageszusammenfassung auf Deutsch.
 
+Stories sind bereits klassifiziert (du hast die Klassifikation selbst im vorherigen Schritt erzeugt):
+- types: einer von release, forschung, tool, infrastruktur, business, policy, demo
+- domains: llm-core, coding, agenten, bild-video, audio, robotik, vertikal, sonstige
+- flags: open-source, frontier, big-lab
+
 Regeln:
-- Berücksichtige die User-Prioritäten (falls angegeben). Wenn keine User-Prioritäten gegeben sind, sortiere nach allgemeiner Wichtigkeit: Recency (latest_published_at = neuer ist besser), Source-Count (mehrere Quellen = wichtig), Tag-Diversität.
+- Berücksichtige die User-Prioritäten (falls angegeben). Wenn keine User-Prioritäten gegeben sind, sortiere nach allgemeiner Wichtigkeit: Recency (latest_published_at = neuer ist besser), Source-Count (mehrere Quellen = wichtig), Themenvielfalt (verschiedene types/domains in den Top-Stories vertreten).
 - WICHTIG: Stories mit altem latest_published_at (Wochen/Monate zurück) NICHT in den Top auswählen, auch wenn sie technisch im Window liegen — bevorzuge die jüngsten Releases.
 - meta_summary_de: 2–3 Absätze, was heute in der KI-Welt passiert ist. Sachlich, kein Marketing-Sprech, kein "Heute ist..."-Geschwafel. Direkt einsteigen.
 - top_stories: 5–7 Stories. Mehr wenn der Tag viel Substanz hat, weniger wenn dünn. rank: 1 = wichtigste.
@@ -130,7 +135,7 @@ def generate(reuse_last_window: bool = False) -> Optional[DailyDigest]:
             "id": s.id,
             "title_de": s.title_de,
             "summary_de": s.summary_de,
-            "tags": normalize_tags(s.tags),
+            **split_tags(s.tags),
             "source_count": s.source_count,
             "latest_published_at": (
                 latest_pub_by_story.get(s.id).isoformat()

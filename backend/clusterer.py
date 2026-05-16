@@ -26,7 +26,7 @@ Regeln:
   Vergleiche die Versionsnummer im Artikel-Titel mit der in der offenen Story. Bei abweichender Version: NEUE Story.
 - Verschiedene Releases desselben Herstellers (z.B. "Claude 4.7 Release" vs "Claude Security Beta") sind eigene Stories.
 - DATUMSCHECK: Wenn ein Artikel ein Datum (published_at) Wochen/Monate vor dem first_seen einer offenen Story hat, ist es vermutlich ein älterer Backfill und gehört NICHT zur aktuellen Story — leg eine neue an.
-- Jedes ArXiv-Paper ist normalerweise eine eigene Story, außer ein News-Artikel berichtet direkt darüber.
+- Jedes wissenschaftliche Paper (ArXiv, HuggingFace Daily Papers) ist normalerweise eine eigene Story, außer ein News-Artikel berichtet direkt darüber.
 - Story-Titel: kurz, auf Deutsch, max 7 Wörter (z.B. "GPT-5.5 Veröffentlichung", "Gemini 2.5 Flash Release"). Versionsnummern beibehalten.
 - story_id = null bedeutet: neue Story anlegen mit new_story_title.
 
