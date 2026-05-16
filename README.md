@@ -96,8 +96,9 @@ RSS_FEEDS.append({
     "name": "Mein Blog",
     "url": "https://example.com/feed.xml",
 })
-# Bei Bedarf in backend/source_catalog.py Metadaten ergänzen
-# (section, story_kind, category, is_primary_source).
+# Für reine Paper-Feeds (arXiv-Style) zusätzlich den Namen in
+# backend/source_catalog.py:_PAPER_SOURCES eintragen — dann landen die Stories
+# im Paper-Stream und überspringen das Content-Tagging.
 ```
 
 ## Projektstruktur

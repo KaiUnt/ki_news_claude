@@ -20,11 +20,7 @@ interface Props {
 
 export function StoryCard({ story, onSelect, onToggleFavorite }: Props) {
   const headline = story.primary_title || story.title_de
-  const laneLabel = story.story_kind === 'paper'
-    ? 'Paper'
-    : story.story_kind === 'research'
-      ? 'Forschung'
-      : null
+  const isPaper = story.story_kind === 'paper'
   return (
     <article
       onClick={() => onSelect(story.id)}
@@ -41,19 +37,9 @@ export function StoryCard({ story, onSelect, onToggleFavorite }: Props) {
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex flex-wrap gap-1">
-          {laneLabel && (
+          {isPaper && (
             <span className="px-2 py-0.5 rounded-full border border-cyan-500/30 bg-cyan-500/10 text-cyan-200 text-[11px]">
-              {laneLabel}
-            </span>
-          )}
-          {story.has_primary_source && (
-            <span className="px-2 py-0.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 text-[11px]">
-              Primarquelle
-            </span>
-          )}
-          {story.has_broad_source && (
-            <span className="px-2 py-0.5 rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-200 text-[11px]">
-              Breiter Feed
+              Paper
             </span>
           )}
           {story.tags.map(t => <TagBadge key={t} tag={t} />)}

@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { fetchStories } from '../api'
-import type { Story, StoryKind } from '../types'
+import type { Story } from '../types'
 
-const DASHBOARD_FILTERS = {
-  tags: [],
+export type DashboardMode = 'paper' | 'forschung'
+
+const BASE_FILTERS = {
   excludeTags: [],
   sources: [],
   dateFrom: '',
@@ -13,7 +14,7 @@ const DASHBOARD_FILTERS = {
 }
 
 export function useDashboardStories(
-  storyKind: StoryKind,
+  mode: DashboardMode,
   enabled: boolean,
   refreshKey: number,
   limit = 6,
@@ -31,18 +32,22 @@ export function useDashboardStories(
       setLoading(true)
       setError(null)
 
-      fetchStories(
-        DASHBOARD_FILTERS,
-        0,
-        limit,
-        ac.signal,
-        { section: 'research', storyKind },
-      )
+      const filters = {
+        ...BASE_FILTERS,
+        tags: mode === 'forschung' ? ['type:forschung'] : [],
+      }
+      const options = mode === 'paper' ? { storyKind: 'paper' as const } : {}
+
+      fetchStories(filters, 0, limit, ac.signal, options)
         .then(data => {
           if (!ac.signal.aborted) setStories(data.items)
         })
         .catch(e => {
-          if (e.name !== 'AbortError') setError('Fehler beim Laden der Forschungs-Stories')
+          if (e.name !== 'AbortError') {
+            setError(mode === 'paper'
+              ? 'Fehler beim Laden der Paper-Stories'
+              : 'Fehler beim Laden der Forschungs-Stories')
+          }
         })
         .finally(() => {
           if (!ac.signal.aborted) setLoading(false)
@@ -50,7 +55,7 @@ export function useDashboardStories(
     })
 
     return () => ac.abort()
-  }, [enabled, limit, refreshKey, storyKind])
+  }, [enabled, limit, refreshKey, mode])
 
   function setStoryFavorite(storyId: number, isFavorite: boolean) {
     setStories(prev => prev.map(story => (

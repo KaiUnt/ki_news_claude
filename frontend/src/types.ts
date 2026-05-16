@@ -1,8 +1,4 @@
-export type StorySection = 'general' | 'research'
-export type StoryKind = 'general' | 'research' | 'paper'
-export type SourceCategory = 'official' | 'media' | 'community' | 'policy' | 'papers'
-export type IngestionMode = 'rss' | 'api' | 'scrape' | 'hybrid'
-export type FeedScope = 'focused' | 'broad'
+export type StoryKind = 'general' | 'paper'
 
 export interface Story {
   id: number
@@ -15,12 +11,7 @@ export interface Story {
   last_updated: string
   is_processed: boolean
   is_favorite: boolean
-  section: StorySection
   story_kind: StoryKind
-  has_primary_source: boolean
-  has_broad_source: boolean
-  source_categories: SourceCategory[]
-  source_ingestion_modes: IngestionMode[]
 }
 
 export interface Source {
@@ -47,12 +38,7 @@ export interface SourceConfig {
   name: string
   url: string
   type: string
-  section: StorySection
   story_kind: StoryKind
-  category: SourceCategory
-  ingestion_mode: IngestionMode
-  feed_scope: FeedScope
-  is_primary_source: boolean
 }
 
 export type SortOrder = 'date_desc' | 'date_asc'

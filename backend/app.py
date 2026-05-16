@@ -167,8 +167,7 @@ def list_stories(
     tags: Optional[str] = Query(None, description="Comma-separated tag filter"),
     exclude_tags: Optional[str] = Query(None, description="Comma-separated tags to exclude"),
     sources: Optional[str] = Query(None, description="Filter by source_name (any article in story)"),
-    section: Optional[str] = Query(None, pattern="^(general|research)$"),
-    story_kind: Optional[str] = Query(None, pattern="^(general|research|paper)$"),
+    story_kind: Optional[str] = Query(None, pattern="^(general|paper)$"),
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
     search: Optional[str] = Query(None),
@@ -221,14 +220,12 @@ def list_stories(
         with Session(engine) as session:
             source_map = _batch_story_articles(session, story_ids)
 
-    if section or story_kind:
+    if story_kind:
         filtered = []
         for story in stories:
             story_sources = source_map.get(story.id, [])
             signals = _story_signals(story_sources)
-            if section and signals["section"] != section:
-                continue
-            if story_kind and signals["story_kind"] != story_kind:
+            if signals["story_kind"] != story_kind:
                 continue
             filtered.append(story)
         stories = filtered

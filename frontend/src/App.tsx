@@ -36,7 +36,7 @@ export default function App() {
 
   const stories = useStories(filters)
   const digest  = useDigest()
-  const researchStories = useDashboardStories('research', view === 'dashboard', dashboardRefreshKey)
+  const researchStories = useDashboardStories('forschung', view === 'dashboard', dashboardRefreshKey)
   const paperStories = useDashboardStories('paper', view === 'dashboard', dashboardRefreshKey)
   const favorites = useFavorites(view === 'favorites', favoriteRefreshKey)
 
