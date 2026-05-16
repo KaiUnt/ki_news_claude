@@ -1,174 +1,191 @@
-import os
+﻿import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
-AVAILABLE_TAGS = [
-    "Neue Modelle",
-    "Tools & Produkte",
-    "Technik & Infrastruktur",
-    "Forschung / Paper",
-    "Kosten & Business",
-    "Open Source",
-    "Sonstiges",
+STORY_TYPES = [
+    "release",
+    "forschung",
+    "tool",
+    "infrastruktur",
+    "business",
+    "policy",
+    "demo",
 ]
+
+STORY_DOMAINS = [
+    "llm-core",
+    "coding",
+    "agenten",
+    "bild-video",
+    "audio",
+    "robotik",
+    "vertikal",
+    "sonstige",
+]
+
+STORY_FLAGS = [
+    "open-source",
+    "frontier",
+    "big-lab",
+]
+
+# Heuristic mapping for stories tagged before the schema rewrite. Applied at
+# read-time in _normalize_tags so old data stays filterable without re-tagging.
+# Entries that map to None are silently dropped.
+LEGACY_TAG_MAPPING: dict[str, str | None] = {
+    "Neue Modelle": "type:release",
+    "Tools & Produkte": "type:tool",
+    "Technik & Infrastruktur": "type:infrastruktur",
+    "Forschung / Paper": "type:forschung",
+    "Kosten & Business": "type:business",
+    "Open Source": "flag:open-source",
+    "Sonstiges": None,
+}
+
+
+def normalize_tags(tags: list[str]) -> list[str]:
+    """Translate legacy tag names to the new prefixed schema.
+
+    Already-prefixed tags pass through unchanged. Unknown legacy strings drop out.
+    Used at read time so existing stories stay filterable without re-tagging.
+    """
+    result: list[str] = []
+    for t in tags:
+        if ":" in t:
+            result.append(t)
+            continue
+        mapped = LEGACY_TAG_MAPPING.get(t)
+        if mapped:
+            result.append(mapped)
+    return result
 
 RSS_FEEDS = [
     # ── KI-Labs & Unternehmen ──────────────────────────────────────────────────
     {
         "name": "OpenAI Blog",
         "url": "https://openai.com/news/rss.xml",
-        "tag_hint": "Neue Modelle",
     },
     {
         "name": "Anthropic News",
         # Anthropic hat keinen offiziellen Feed; Olshansk-Mirror wird stuendlich regeneriert.
         "url": "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_anthropic_news.xml",
-        "tag_hint": "Neue Modelle",
     },
     {
         "name": "Google DeepMind",
         "url": "https://deepmind.google/blog/rss.xml",
-        "tag_hint": "Forschung / Paper",
     },
     {
         "name": "Google AI Blog",
         "url": "https://blog.google/technology/ai/rss/",
-        "tag_hint": "Neue Modelle",
     },
     {
         "name": "Google Gemini Blog",
         "url": "https://blog.google/products/gemini/rss/",
-        "tag_hint": "Neue Modelle",
     },
     {
         "name": "Google Research",
         "url": "https://research.google/blog/rss/",
-        "tag_hint": "Forschung / Paper",
     },
     {
         "name": "NVIDIA AI Blog",
         "url": "https://blogs.nvidia.com/feed/",
-        "tag_hint": "Technik & Infrastruktur",
     },
     {
         "name": "Microsoft Research",
         "url": "https://www.microsoft.com/en-us/research/blog/feed/",
-        "tag_hint": "Forschung / Paper",
     },
     {
         "name": "Microsoft AI Blog",
         "url": "https://blogs.microsoft.com/ai/feed/",
-        "tag_hint": "Tools & Produkte",
     },
     {
         "name": "Anthropic Research",
         "url": "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_anthropic_research.xml",
-        "tag_hint": "Forschung / Paper",
     },
     {
         "name": "Anthropic Engineering",
         "url": "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_anthropic_engineering.xml",
-        "tag_hint": "Technik & Infrastruktur",
     },
     # ── Community & Open Source ────────────────────────────────────────────────
     {
         "name": "HuggingFace Blog",
         "url": "https://huggingface.co/blog/feed.xml",
-        "tag_hint": "Tools & Produkte",
     },
     {
         "name": "HuggingFace Daily Papers",
         "url": "https://papers.takara.ai/api/feed",
-        "tag_hint": "Forschung / Paper",
     },
     {
         "name": "ArXiv cs.AI",
         "url": "https://export.arxiv.org/rss/cs.AI",
-        "tag_hint": "Forschung / Paper",
     },
     {
         "name": "ArXiv cs.LG",
         "url": "https://export.arxiv.org/rss/cs.LG",
-        "tag_hint": "Forschung / Paper",
     },
     {
         "name": "ArXiv cs.CL",
         "url": "https://export.arxiv.org/rss/cs.CL",
-        "tag_hint": "Forschung / Paper",
     },
     # ── Technologie-Medien ─────────────────────────────────────────────────────
     {
         "name": "TechCrunch AI",
         "url": "https://techcrunch.com/category/artificial-intelligence/feed/",
-        "tag_hint": "Neue Modelle",
     },
     {
         "name": "VentureBeat AI",
         "url": "https://venturebeat.com/category/ai/feed/",
-        "tag_hint": "Kosten & Business",
     },
     {
         "name": "MIT Technology Review AI",
         "url": "https://www.technologyreview.com/topic/artificial-intelligence/feed/",
-        "tag_hint": "Forschung / Paper",
     },
     {
         "name": "Wired AI",
         "url": "https://www.wired.com/feed/tag/ai/latest/rss",
-        "tag_hint": "Technik & Infrastruktur",
     },
     {
         "name": "AWS ML Blog",
         "url": "https://aws.amazon.com/blogs/machine-learning/feed/",
-        "tag_hint": "Technik & Infrastruktur",
     },
     {
         "name": "The Decoder",
         "url": "https://the-decoder.de/feed/",
-        "tag_hint": "Neue Modelle",
     },
     {
         "name": "Heise KI",
         "url": "https://www.heise.de/thema/Kuenstliche-Intelligenz.xml",
-        "tag_hint": "Neue Modelle",
     },
     {
         "name": "Golem KI",
         "url": "https://rss.golem.de/rss.php?feed=RSS2.0&ressort=ki",
-        "tag_hint": "Neue Modelle",
     },
     {
         "name": "t3n KI",
         "url": "https://t3n.de/tag/kuenstliche-intelligenz/rss.xml",
-        "tag_hint": "Neue Modelle",
     },
     # ── Newsletter & Individuelle Stimmen (Substack/Atom) ──────────────────────
     {
         "name": "Simon Willison",
         "url": "https://simonwillison.net/atom/everything/",
-        "tag_hint": "Tools & Produkte",
     },
     {
         "name": "Interconnects (Nathan Lambert)",
         "url": "https://www.interconnects.ai/feed",
-        "tag_hint": "Forschung / Paper",
     },
     {
         "name": "Latent Space (Swyx)",
         "url": "https://www.latent.space/feed",
-        "tag_hint": "Tools & Produkte",
     },
     {
         "name": "Ahead of AI (Raschka)",
         "url": "https://magazine.sebastianraschka.com/feed",
-        "tag_hint": "Forschung / Paper",
     },
     # ── Regulierung & Policy ───────────────────────────────────────────────────
     {
         "name": "EU AI Act News",
         "url": "https://artificialintelligenceact.eu/feed/",
-        "tag_hint": "Sonstiges",
     },
 ]
 

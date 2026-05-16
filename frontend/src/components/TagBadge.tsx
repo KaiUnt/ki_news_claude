@@ -1,12 +1,10 @@
-const TAG_STYLES: Record<string, string> = {
-  'Neue Modelle':            'bg-purple-950 text-purple-300 border-purple-700',
-  'Tools & Produkte':        'bg-teal-950 text-teal-300 border-teal-700',
-  'Technik & Infrastruktur': 'bg-orange-950 text-orange-300 border-orange-700',
-  'Forschung / Paper':       'bg-blue-950 text-blue-300 border-blue-700',
-  'Kosten & Business':       'bg-amber-950 text-amber-300 border-amber-700',
-  'Open Source':             'bg-green-950 text-green-300 border-green-700',
-  'Sonstiges':               'bg-slate-800 text-slate-400 border-slate-600',
-}
+import { tagAxis, tagLabel } from '../tagSchema'
+
+const AXIS_STYLES = {
+  type:   'bg-indigo-950 text-indigo-300 border-indigo-700',
+  domain: 'bg-teal-950 text-teal-300 border-teal-700',
+  flag:   'bg-amber-950 text-amber-300 border-amber-700',
+} as const
 
 const DEFAULT_STYLE = 'bg-slate-800 text-slate-400 border-slate-600'
 
@@ -17,7 +15,9 @@ interface Props {
 }
 
 export function TagBadge({ tag, active = false, onClick }: Props) {
-  const base = TAG_STYLES[tag] ?? DEFAULT_STYLE
+  const axis = tagAxis(tag)
+  const base = axis ? AXIS_STYLES[axis] : DEFAULT_STYLE
+  const label = tagLabel(tag)
   const baseClass = `inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${base} select-none`
 
   if (onClick) {
@@ -31,10 +31,10 @@ export function TagBadge({ tag, active = false, onClick }: Props) {
         aria-pressed={active}
         className={`${baseClass} ${stateClass} cursor-pointer transition-opacity`}
       >
-        {tag}
+        {label}
       </button>
     )
   }
 
-  return <span className={baseClass}>{tag}</span>
+  return <span className={baseClass}>{label}</span>
 }

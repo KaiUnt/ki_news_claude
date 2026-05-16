@@ -3,6 +3,7 @@ import type {
   DigestLatest, DigestSummary, UserProfile, FavoritesResponse, Story,
   StoryKind, StorySection,
 } from './types'
+import type { TagSchema } from './tagSchema'
 
 const BASE = '/api'
 
@@ -20,6 +21,7 @@ export async function fetchStories(
 ): Promise<StoriesResponse> {
   const params = new URLSearchParams()
   if (filters.tags.length)    params.set('tags', filters.tags.join(','))
+  if (filters.excludeTags.length) params.set('exclude_tags', filters.excludeTags.join(','))
   if (filters.sources.length) params.set('sources', filters.sources.join(','))
   if (filters.dateFrom)       params.set('date_from', filters.dateFrom)
   if (filters.dateTo)         params.set('date_to', filters.dateTo)
@@ -41,11 +43,15 @@ export async function fetchStoryDetail(id: number): Promise<StoryDetail> {
   return res.json()
 }
 
-export async function fetchTags(): Promise<string[]> {
+export async function fetchTagSchema(): Promise<TagSchema> {
   const res = await fetch(`${BASE}/tags`)
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   const data = await res.json()
-  return data.tags
+  return {
+    types:   data.types   ?? [],
+    domains: data.domains ?? [],
+    flags:   data.flags   ?? [],
+  }
 }
 
 export async function fetchSources(): Promise<SourceConfig[]> {

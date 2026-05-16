@@ -4,6 +4,7 @@ import type { Story, StoryKind } from '../types'
 
 const DASHBOARD_FILTERS = {
   tags: [],
+  excludeTags: [],
   sources: [],
   dateFrom: '',
   dateTo: '',

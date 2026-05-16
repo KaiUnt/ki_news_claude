@@ -59,6 +59,7 @@ export type SortOrder = 'date_desc' | 'date_asc'
 
 export interface Filters {
   tags: string[]
+  excludeTags: string[]
   sources: string[]
   dateFrom: string
   dateTo: string

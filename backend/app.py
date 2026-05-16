@@ -16,7 +16,7 @@ from .deduplicator import deduplicate, content_hash
 from .clusterer import cluster_articles
 from .summarizer import Summarizer
 from . import digest_generator
-from .config import AVAILABLE_TAGS
+from .config import STORY_TYPES, STORY_DOMAINS, STORY_FLAGS, normalize_tags
 from .source_catalog import list_source_configs, story_signals_for_source_names
 
 app = FastAPI(title="KI-News Dashboard API", version="2.0.0")
@@ -54,7 +54,7 @@ def _story_to_dict(
         "title_de": s.title_de,
         "primary_title": primary_title,
         "summary_de": s.summary_de,
-        "tags": s.tags,
+        "tags": normalize_tags(s.tags),
         "source_count": s.source_count,
         "first_seen": s.first_seen.isoformat() if s.first_seen else None,
         "last_updated": s.last_updated.isoformat() if s.last_updated else None,
@@ -165,6 +165,7 @@ class ProfileUpdate(BaseModel):
 @app.get("/api/stories")
 def list_stories(
     tags: Optional[str] = Query(None, description="Comma-separated tag filter"),
+    exclude_tags: Optional[str] = Query(None, description="Comma-separated tags to exclude"),
     sources: Optional[str] = Query(None, description="Filter by source_name (any article in story)"),
     section: Optional[str] = Query(None, pattern="^(general|research)$"),
     story_kind: Optional[str] = Query(None, pattern="^(general|research|paper)$"),
@@ -188,8 +189,12 @@ def list_stories(
         stories = session.exec(stmt).all()
 
     if tags:
-        tag_list = [t.strip() for t in tags.split(",")]
-        stories = [s for s in stories if any(t in s.tags for t in tag_list)]
+        tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+        stories = [s for s in stories if any(t in normalize_tags(s.tags) for t in tag_list)]
+
+    if exclude_tags:
+        excluded = {t.strip() for t in exclude_tags.split(",") if t.strip()}
+        stories = [s for s in stories if not (excluded & set(normalize_tags(s.tags)))]
 
     if search:
         q = search.lower()
@@ -372,7 +377,11 @@ def remove_favorite(story_id: int):
 
 @app.get("/api/tags")
 def list_tags():
-    return {"tags": AVAILABLE_TAGS}
+    return {
+        "types": STORY_TYPES,
+        "domains": STORY_DOMAINS,
+        "flags": STORY_FLAGS,
+    }
 
 
 @app.get("/api/sources")

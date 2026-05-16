@@ -161,7 +161,6 @@ class HackerNewsFetcher(BaseFetcher):
                     source_type="hackernews",
                     content=content,
                     published_at=published_at,
-                    tag_hint=None,
                 ),
             ))
 

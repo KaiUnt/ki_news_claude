@@ -9,7 +9,7 @@ Persönliches Dashboard für tägliche KI-News aus RSS-Feeds und Hacker News —
 - **Story-Clustering:** mehrere Artikel über dasselbe Ereignis werden zu einer Story zusammengefasst
 - **Tages-Digest:** Claude wählt 5–7 Top-Stories und schreibt eine 2–3-Absätze-Tageszusammenfassung — abgestimmt auf einen frei editierbaren Prioritäts-Prompt
 - **Frontend:** React 19 + Tailwind 4, drei Views (Dashboard / Alle Stories / Settings), Tab-Wahl persistent
-- **Tags:** Neue Modelle · Tools & Produkte · Technik & Infrastruktur · Forschung/Paper · Kosten & Business · Open Source
+- **Kategorisierung (3 Achsen):** Typ (release · forschung · tool · infrastruktur · business · policy · demo), Domain (llm-core · coding · agenten · bild-video · audio · robotik · vertikal · sonstige), Flags (open-source · frontier · big-lab). ArXiv-Papers werden quellen-basiert als `story_kind=paper` separiert und überspringen das Content-Tagging.
 
 ## Stack
 
@@ -66,7 +66,7 @@ python scripts/migrate_cluster.py --dry-run  # Bestandsdaten retro-clustern
 | GET | `/api/stories` | Stories mit Filtern: `tags`, `sources`, `date_from`, `date_to`, `search`, `sort`, `processed_only`, `limit`, `offset` |
 | GET | `/api/stories/{id}` | Einzelne Story inkl. Quellen |
 | POST | `/api/fetch` | Pipeline triggern: `?cluster=true&summarize=true&digest=true` |
-| GET | `/api/tags` | Verfügbare Tags |
+| GET | `/api/tags` | Tag-Schema: `{ types, domains, flags }` |
 | GET | `/api/sources` | Konfigurierte Quellen |
 | GET | `/api/stats` | Zähler: Articles, Stories, processed, unclustered |
 | GET | `/api/profile` | User-Profil (Single-Row, multi-user-ready) |
@@ -95,8 +95,9 @@ is_processed                                        top_story_ids_json
 RSS_FEEDS.append({
     "name": "Mein Blog",
     "url": "https://example.com/feed.xml",
-    "tag_hint": "Tools & Produkte",
 })
+# Bei Bedarf in backend/source_catalog.py Metadaten ergänzen
+# (section, story_kind, category, is_primary_source).
 ```
 
 ## Projektstruktur
@@ -104,7 +105,7 @@ RSS_FEEDS.append({
 ```
 backend/
   app.py              FastAPI REST API
-  config.py           Settings, RSS_FEEDS, AVAILABLE_TAGS
+  config.py           Settings, RSS_FEEDS, STORY_TYPES/DOMAINS/FLAGS, normalize_tags
   db.py               SQLModel-Schema + Migration
   fetcher/            RSS + Hacker News
   deduplicator.py     URL + Hash + Fuzzy-Title

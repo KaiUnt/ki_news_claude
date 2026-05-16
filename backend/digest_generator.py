@@ -12,7 +12,7 @@ from typing import Optional
 import anthropic
 from sqlmodel import Session, select, func, or_
 
-from .config import settings
+from .config import settings, normalize_tags
 from .db import Article, Story, DailyDigest, UserProfile, engine
 from .source_catalog import story_signals_for_source_names
 
@@ -130,7 +130,7 @@ def generate(reuse_last_window: bool = False) -> Optional[DailyDigest]:
             "id": s.id,
             "title_de": s.title_de,
             "summary_de": s.summary_de,
-            "tags": s.tags,
+            "tags": normalize_tags(s.tags),
             "source_count": s.source_count,
             "latest_published_at": (
                 latest_pub_by_story.get(s.id).isoformat()

@@ -62,7 +62,6 @@ class RSSFetcher(BaseFetcher):
                             source_type="rss",
                             content=_extract_content(entry),
                             published_at=_parse_date(entry),
-                            tag_hint=feed_cfg.get("tag_hint"),
                         )
                     )
             except Exception as exc:

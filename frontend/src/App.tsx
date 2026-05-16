@@ -17,6 +17,7 @@ import type { Filters, Story } from './types'
 
 const DEFAULT_FILTERS: Filters = {
   tags: [],
+  excludeTags: [],
   sources: [],
   dateFrom: '',
   dateTo: '',
