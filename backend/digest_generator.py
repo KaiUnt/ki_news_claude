@@ -6,15 +6,19 @@ the recent window, scores them against the user's priority_prompt, and writes
 a 2–3 paragraph German meta-summary. Persisted as a DailyDigest row.
 """
 import json
+import logging
 from datetime import datetime, timedelta
 from typing import Optional
 
 import anthropic
+
+logger = logging.getLogger(__name__)
 from sqlmodel import Session, select, func, or_
 
 from .config import settings, split_tags
 from .db import Article, Story, DailyDigest, UserProfile, engine
 from .source_catalog import story_signals_for_source_names
+from .claude_retry import call_with_retry
 
 
 _SYSTEM_PROMPT = """Du bist der News-Editor für ein persönliches KI-News-Dashboard.
@@ -219,7 +223,7 @@ def _call_safe(user_msg: str) -> Optional[tuple[dict, Optional[str]]]:
     raw_for_debug: Optional[str] = None
     try:
         client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-        response = client.messages.create(
+        response = call_with_retry(lambda: client.messages.create(
             model=settings.model_id,
             max_tokens=2048,
             system=[
@@ -230,7 +234,7 @@ def _call_safe(user_msg: str) -> Optional[tuple[dict, Optional[str]]]:
                 }
             ],
             messages=[{"role": "user", "content": user_msg}],
-        )
+        ))
         raw = response.content[0].text.strip()
         raw_for_debug = raw
         if raw.startswith("```"):
@@ -239,5 +243,5 @@ def _call_safe(user_msg: str) -> Optional[tuple[dict, Optional[str]]]:
                 raw = raw[4:]
         return json.loads(raw), raw_for_debug
     except Exception as exc:
-        print(f"[DigestGenerator] Error: {exc} — skipping digest persistence to keep stories eligible for next run")
+        logger.error("[DigestGenerator] Error: %s — skipping digest persistence", exc)
         return None

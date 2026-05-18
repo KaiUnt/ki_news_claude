@@ -3,8 +3,12 @@ from urllib.parse import urlparse
 
 import httpx
 
+import logging
+
 from .base import BaseFetcher, RawArticle
 from ..config import settings
+
+logger = logging.getLogger(__name__)
 
 _HN_SEARCH = "https://hn.algolia.com/api/v1/search"
 _QUERY_TERMS = [
@@ -117,7 +121,7 @@ class HackerNewsFetcher(BaseFetcher):
             resp.raise_for_status()
             data = resp.json()
         except Exception as exc:
-            print(f"[HN] Fetch error: {exc}")
+            logger.error("[HN] Fetch error: %s", exc)
             return []
 
         seen_urls: set[str] = set()

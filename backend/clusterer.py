@@ -6,12 +6,16 @@ each article to an existing story or creates a new one.
 Batches up to BATCH_SIZE articles per call for cost efficiency.
 """
 import json
+import logging
 import anthropic
 from datetime import datetime, timedelta
 from sqlmodel import Session
 
+logger = logging.getLogger(__name__)
+
 from .config import settings
 from .db import Article, Story, engine, get_open_stories
+from .claude_retry import call_with_retry
 
 BATCH_SIZE = 80  # articles per Claude call
 STALE_ARTICLE_DAYS = 7  # articles older than this don't refresh story.last_updated
@@ -59,7 +63,7 @@ def _call_claude(articles: list[Article], open_stories: list[Story]) -> list[dic
         f"NEUE ARTIKEL:\nID | published_at | Titel | Quelle\n{articles_block}"
     )
 
-    response = client.messages.create(
+    response = call_with_retry(lambda: client.messages.create(
         model=settings.model_id,
         max_tokens=4096,
         system=[
@@ -70,7 +74,7 @@ def _call_claude(articles: list[Article], open_stories: list[Story]) -> list[dic
             }
         ],
         messages=[{"role": "user", "content": user_msg}],
-    )
+    ))
 
     raw = response.content[0].text.strip()
     if raw.startswith("```"):
@@ -160,7 +164,7 @@ def _call_claude_safe(articles: list[Article], open_stories: list[Story]) -> lis
     try:
         return _call_claude(articles, open_stories)
     except (json.JSONDecodeError, Exception) as exc:
-        print(f"[Clusterer] Error: {exc} — falling back to solo stories")
+        logger.error("[Clusterer] Error: %s — falling back to solo stories", exc)
         # Fallback: each article gets its own story
         return [
             {"article_id": a.id, "story_id": None, "new_story_title": a.title[:60]}

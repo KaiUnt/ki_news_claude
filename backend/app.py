@@ -1,3 +1,5 @@
+import logging
+import threading
 from datetime import datetime, date, time, timedelta, timezone
 from typing import Optional
 from dateutil import tz
@@ -5,7 +7,7 @@ from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import select, Session
+from sqlmodel import select, Session, func, or_
 from .db import (
     Article, Story, UserProfile, DailyDigest, FavoriteStory, create_db_and_tables, engine,
     get_existing_urls, get_existing_hashes,
@@ -17,9 +19,13 @@ from .clusterer import cluster_articles
 from .summarizer import Summarizer
 from . import digest_generator
 from .config import STORY_TYPES, STORY_DOMAINS, STORY_FLAGS, normalize_tags
-from .source_catalog import list_source_configs, story_signals_for_source_names
+from .source_catalog import list_source_configs, story_signals_for_source_names, PAPER_SOURCES
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="KI-News Dashboard API", version="2.0.0")
+
+_fetch_lock = threading.Lock()
 
 DEFAULT_PROFILE_ID = 1
 LOCAL_TZ = tz.gettz("Europe/Vienna") or timezone(timedelta(hours=1), "Europe/Vienna")
@@ -177,82 +183,83 @@ def list_stories(
     offset: int = Query(0, ge=0),
 ):
     with Session(engine) as session:
-        stmt = select(Story)
+        filters = []
+
         if processed_only:
-            stmt = stmt.where(Story.is_processed == True)
+            filters.append(Story.is_processed == True)
         if date_from:
-            stmt = stmt.where(Story.first_seen >= datetime.combine(date_from, datetime.min.time()))
+            filters.append(Story.first_seen >= datetime.combine(date_from, datetime.min.time()))
         if date_to:
-            stmt = stmt.where(Story.first_seen <= datetime.combine(date_to, datetime.max.time()))
+            filters.append(Story.first_seen <= datetime.combine(date_to, datetime.max.time()))
 
-        stories = session.exec(stmt).all()
+        # Tag filter: AND across axes, OR within axis — pushed to SQL via LIKE on tags_json.
+        # E.g. type:release,type:forschung,domain:coding →
+        #   WHERE (tags_json LIKE '%"type:release"%' OR tags_json LIKE '%"type:forschung"%')
+        #     AND (tags_json LIKE '%"domain:coding"%')
+        if tags:
+            tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+            tags_by_axis: dict[str, list[str]] = {}
+            for t in tag_list:
+                axis = t.split(":", 1)[0] if ":" in t else "_legacy"
+                tags_by_axis.setdefault(axis, []).append(t)
+            for axis_tags in tags_by_axis.values():
+                filters.append(or_(*[Story.tags_json.like(f'%"{t}"%') for t in axis_tags]))
 
-    if tags:
-        tag_list = [t.strip() for t in tags.split(",") if t.strip()]
-        # AND across axes, OR within: a story must hit at least one selected
-        # tag in *every* axis the user filtered on. E.g. picking type:release +
-        # type:forschung + domain:coding requires (release OR forschung) AND coding.
-        tags_by_axis: dict[str, list[str]] = {}
-        for t in tag_list:
-            axis = t.split(":", 1)[0] if ":" in t else "_legacy"
-            tags_by_axis.setdefault(axis, []).append(t)
+        if exclude_tags:
+            for tag in [t.strip() for t in exclude_tags.split(",") if t.strip()]:
+                # NULL tags_json means no tags — story passes the exclude filter correctly.
+                filters.append(or_(Story.tags_json.is_(None), ~Story.tags_json.like(f'%"{tag}"%')))
 
-        def _matches_all_axes(story_tags: list[str]) -> bool:
-            normalized = normalize_tags(story_tags)
-            return all(
-                any(t in normalized for t in axis_tags)
-                for axis_tags in tags_by_axis.values()
+        if search:
+            q = f"%{search}%"
+            filters.append(or_(Story.title_de.ilike(q), Story.summary_de.ilike(q)))
+
+        if sources:
+            src_list = [s.strip() for s in sources.split(",") if s.strip()]
+            source_subq = (
+                select(Article.story_id)
+                .where(Article.story_id.is_not(None))
+                .where(Article.source_name.in_(src_list))
+                .distinct()
             )
+            filters.append(Story.id.in_(source_subq))
 
-        stories = [s for s in stories if _matches_all_axes(s.tags)]
+        if story_kind:
+            paper_sources = list(PAPER_SOURCES)
+            non_paper_subq = (
+                select(Article.story_id)
+                .where(Article.story_id.is_not(None))
+                .where(~Article.source_name.in_(paper_sources))
+                .distinct()
+            )
+            if story_kind == "paper":
+                # Paper story: has articles, and none from non-paper sources.
+                has_articles_subq = (
+                    select(Article.story_id)
+                    .where(Article.story_id.is_not(None))
+                    .distinct()
+                )
+                filters.append(Story.id.in_(has_articles_subq))
+                filters.append(~Story.id.in_(non_paper_subq))
+            else:
+                # General story: at least one article from a non-paper source.
+                filters.append(Story.id.in_(non_paper_subq))
 
-    if exclude_tags:
-        excluded = {t.strip() for t in exclude_tags.split(",") if t.strip()}
-        stories = [s for s in stories if not (excluded & set(normalize_tags(s.tags)))]
+        # Count matching stories without loading them.
+        count_stmt = select(func.count(Story.id))
+        for f in filters:
+            count_stmt = count_stmt.where(f)
+        total = session.exec(count_stmt).one()
 
-    if search:
-        q = search.lower()
-        stories = [
-            s for s in stories
-            if q in (s.title_de or "").lower() or q in (s.summary_de or "").lower()
-        ]
+        # Fetch the requested page, sorted in DB.
+        sort_expr = func.coalesce(Story.last_updated, Story.first_seen)
+        order = sort_expr.desc() if sort == "date_desc" else sort_expr.asc()
+        data_stmt = select(Story).order_by(order).offset(offset).limit(limit)
+        for f in filters:
+            data_stmt = data_stmt.where(f)
+        page = list(session.exec(data_stmt).all())
 
-    if sources:
-        src_list = {s.strip() for s in sources.split(",")}
-        filtered = []
-        with Session(engine) as session:
-            for story in stories:
-                story_sources = session.exec(
-                    select(Article.source_name).where(Article.story_id == story.id)
-                ).all()
-                if src_list & set(story_sources):
-                    filtered.append(story)
-        stories = filtered
-
-    if story_kind:
-        story_ids = [s.id for s in stories if s.id is not None]
-        with Session(engine) as session:
-            source_map = _batch_story_articles(session, story_ids) if story_ids else {}
-        filtered = []
-        for story in stories:
-            story_sources = source_map.get(story.id, [])
-            signals = _story_signals(story_sources)
-            if signals["story_kind"] != story_kind:
-                continue
-            filtered.append(story)
-        stories = filtered
-
-    reverse = sort == "date_desc"
-    stories.sort(
-        key=lambda s: s.last_updated or s.first_seen or datetime.min,
-        reverse=reverse,
-    )
-
-    total = len(stories)
-    page = stories[offset: offset + limit]
-
-    page_ids = [s.id for s in page if s.id is not None]
-    with Session(engine) as session:
+        page_ids = [s.id for s in page if s.id is not None]
         primaries = _batch_primary_titles(session, page_ids)
         favorite_ids = _favorite_story_ids(session, page_ids)
         page_source_map = _batch_story_articles(session, page_ids)
@@ -519,14 +526,15 @@ def regenerate_digest():
 @app.get("/api/stats")
 def get_stats():
     with Session(engine) as session:
-        total_articles = len(session.exec(select(Article)).all())
-        total_stories = len(session.exec(select(Story)).all())
-        processed_stories = len(session.exec(select(Story).where(Story.is_processed == True)).all())
-        unclustered = len(session.exec(select(Article).where(Article.story_id == None)).all())
-        source_names = list({
-            a.source_name
-            for a in session.exec(select(Article)).all()
-        })
+        total_articles = session.exec(select(func.count(Article.id))).one()
+        total_stories = session.exec(select(func.count(Story.id))).one()
+        processed_stories = session.exec(
+            select(func.count(Story.id)).where(Story.is_processed == True)
+        ).one()
+        unclustered = session.exec(
+            select(func.count(Article.id)).where(Article.story_id == None)
+        ).one()
+        source_names = list(session.exec(select(Article.source_name).distinct()).all())
     return {
         "total_articles": total_articles,
         "total_stories": total_stories,
@@ -545,6 +553,15 @@ def trigger_fetch(
     digest: bool = Query(True),
 ):
     """Fetch → dedup → save → cluster → summarize → digest pipeline."""
+    if not _fetch_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="Fetch already in progress")
+    try:
+        return _run_fetch(cluster=cluster, summarize=summarize, digest=digest)
+    finally:
+        _fetch_lock.release()
+
+
+def _run_fetch(cluster: bool, summarize: bool, digest: bool) -> dict:
     # Fetch
     fetchers = [RSSFetcher(), HackerNewsFetcher()]
     raw: list[RawArticle] = []
@@ -607,7 +624,7 @@ def trigger_fetch(
             if generated is not None:
                 digest_id = generated.id
         except Exception as exc:
-            print(f"[fetch] Digest generation failed: {exc}")
+            logger.error("[fetch] Digest generation failed: %s", exc)
 
     return {
         "fetched": len(raw),

@@ -7,12 +7,16 @@ story on three axes (type / domains / flags); paper stories skip the tag step.
 is_processed=True afterwards.
 """
 import json
+import logging
 import anthropic
 from sqlmodel import Session, select
+
+logger = logging.getLogger(__name__)
 
 from .config import settings, STORY_TYPES, STORY_DOMAINS, STORY_FLAGS
 from .db import Article, Story, engine
 from .source_catalog import story_signals_for_source_names
+from .claude_retry import call_with_retry
 
 
 def _build_general_prompt() -> str:
@@ -163,7 +167,7 @@ class Summarizer:
           and stops retrying — the same prompt would truncate again forever.
         """
         try:
-            response = self._client.messages.create(
+            response = call_with_retry(lambda: self._client.messages.create(
                 model=settings.model_id,
                 max_tokens=max_tokens,
                 system=[
@@ -174,7 +178,7 @@ class Summarizer:
                     }
                 ],
                 messages=[{"role": "user", "content": user_content}],
-            )
+            ))
             raw = response.content[0].text.strip()
             if raw.startswith("```"):
                 raw = raw.split("```")[1]
@@ -184,16 +188,16 @@ class Summarizer:
                 return json.loads(raw)
             except json.JSONDecodeError as exc:
                 if response.stop_reason == "max_tokens":
-                    print(
-                        f"[Summarizer] Response truncated at max_tokens={max_tokens} — "
-                        f"marking story processed with placeholder to prevent retry loop"
+                    logger.warning(
+                        "[Summarizer] Truncated at max_tokens=%d — marking processed with placeholder",
+                        max_tokens,
                     )
                     return {"summary_de": "(Zusammenfassung fehlgeschlagen — Antwort zu lang)"}
-                print(
-                    f"[Summarizer] JSON decode failed (stop_reason={response.stop_reason}): "
-                    f"{exc} — story stays unprocessed for retry"
+                logger.warning(
+                    "[Summarizer] JSON decode failed (stop_reason=%s): %s — story stays unprocessed",
+                    response.stop_reason, exc,
                 )
                 return {"summary_de": None}
         except Exception as exc:
-            print(f"[Summarizer] Error: {exc}")
+            logger.error("[Summarizer] Error: %s", exc)
             return {"summary_de": None}

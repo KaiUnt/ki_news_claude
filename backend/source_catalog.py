@@ -28,12 +28,13 @@ class SourceMetadata(TypedDict):
 # Feed names whose stories should be treated as papers (skip content-tagging,
 # routed to the Paper-Stream lane). Any feed delivering raw arXiv-style
 # abstracts belongs here.
-_PAPER_SOURCES = {
+PAPER_SOURCES: frozenset[str] = frozenset({
     "ArXiv cs.AI",
     "ArXiv cs.LG",
     "ArXiv cs.CL",
     "HuggingFace Daily Papers",
-}
+})
+_PAPER_SOURCES = PAPER_SOURCES  # internal alias kept for compatibility
 
 
 def _build_catalog() -> dict[str, SourceMetadata]:
