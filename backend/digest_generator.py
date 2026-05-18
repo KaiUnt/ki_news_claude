@@ -153,7 +153,14 @@ def generate(reuse_last_window: bool = False) -> Optional[DailyDigest]:
         f"{json.dumps(stories_payload, ensure_ascii=False, indent=2)}"
     )
 
-    result, raw_response = _call_safe(user_msg, stories)
+    call_result = _call_safe(user_msg)
+    if call_result is None:
+        # Claude failed — skip persistence so stories stay eligible for the next
+        # run instead of being "burnt" by an empty fallback digest. window_start
+        # for the next pipeline run stays at the previous successful digest's
+        # generated_at, so the same pool is reconsidered.
+        return None
+    result, raw_response = call_result
 
     digest = DailyDigest(
         user_profile_id=profile_id,
@@ -202,9 +209,13 @@ def _compute_window_start(session: Session, reuse_last_window: bool) -> datetime
     return datetime.utcnow() - timedelta(hours=24)
 
 
-def _call_safe(user_msg: str, stories: list[Story]) -> tuple[dict, Optional[str]]:
-    """Call Claude. On any error, fall back to a top-by-source_count digest.
-    Returns (parsed_result, raw_response_or_None)."""
+def _call_safe(user_msg: str) -> Optional[tuple[dict, Optional[str]]]:
+    """Call Claude. On any error, return None so the caller skips persistence.
+
+    Persisting an empty fallback digest would mark its top stories with
+    first_digest_id and exclude them from the next regular run — losing the
+    most important stories of the day on a Claude outage.
+    """
     raw_for_debug: Optional[str] = None
     try:
         client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
@@ -228,15 +239,5 @@ def _call_safe(user_msg: str, stories: list[Story]) -> tuple[dict, Optional[str]
                 raw = raw[4:]
         return json.loads(raw), raw_for_debug
     except Exception as exc:
-        print(f"[DigestGenerator] Error: {exc} — falling back to source_count ranking")
-        top = sorted(stories, key=lambda s: s.source_count, reverse=True)[:5]
-        return (
-            {
-                "meta_summary_de": "",
-                "top_stories": [
-                    {"story_id": s.id, "rank": i + 1, "why": "Fallback: höchste Quellen-Anzahl"}
-                    for i, s in enumerate(top)
-                ],
-            },
-            raw_for_debug,
-        )
+        print(f"[DigestGenerator] Error: {exc} — skipping digest persistence to keep stories eligible for next run")
+        return None
