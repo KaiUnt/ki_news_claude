@@ -153,10 +153,14 @@ class Summarizer:
         return self._call(user_content, _PAPER_SYSTEM_PROMPT, max_tokens=256)
 
     def _call(self, user_content: str, system_prompt: str, max_tokens: int) -> dict:
-        """Call Claude and return parsed JSON. On *any* failure, return
-        summary_de=None so the caller leaves the story unprocessed and a future
-        run retries it. We never persist a truncated user_content as if it were
-        a valid summary — that would mark the story is_processed=True with junk.
+        """Call Claude and return parsed JSON.
+
+        - On transient failure (network, non-truncation JSON error): returns
+          {"summary_de": None} so the caller leaves the story unprocessed and
+          a future run retries it.
+        - On max_tokens truncation (stop_reason confirms it): returns a
+          placeholder summary so the caller marks the story is_processed=True
+          and stops retrying — the same prompt would truncate again forever.
         """
         try:
             response = self._client.messages.create(
@@ -176,10 +180,20 @@ class Summarizer:
                 raw = raw.split("```")[1]
                 if raw.startswith("json"):
                     raw = raw[4:]
-            return json.loads(raw)
-        except json.JSONDecodeError as exc:
-            print(f"[Summarizer] JSON decode failed: {exc} — story stays unprocessed for retry")
-            return {"summary_de": None}
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError as exc:
+                if response.stop_reason == "max_tokens":
+                    print(
+                        f"[Summarizer] Response truncated at max_tokens={max_tokens} — "
+                        f"marking story processed with placeholder to prevent retry loop"
+                    )
+                    return {"summary_de": "(Zusammenfassung fehlgeschlagen — Antwort zu lang)"}
+                print(
+                    f"[Summarizer] JSON decode failed (stop_reason={response.stop_reason}): "
+                    f"{exc} — story stays unprocessed for retry"
+                )
+                return {"summary_de": None}
         except Exception as exc:
             print(f"[Summarizer] Error: {exc}")
             return {"summary_de": None}
