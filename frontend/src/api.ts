@@ -152,8 +152,3 @@ export async function fetchRedditStats(): Promise<RedditSubredditStats[]> {
   return res.json()
 }
 
-export async function triggerRedditFetch(): Promise<{ fetched: number; new_saved: number }> {
-  const res = await fetch(`${BASE}/reddit/fetch`, { method: 'POST' })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  return res.json()
-}

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { fetchRedditPosts, fetchRedditStats, triggerRedditFetch } from '../api'
+import { fetchRedditPosts, fetchRedditStats } from '../api'
 import type { RedditPost, RedditSubredditStats } from '../types'
 import type { RedditSortOrder } from '../api'
 
@@ -122,7 +122,6 @@ export function Reddit() {
   const [sort, setSort]             = useState<RedditSortOrder>('score')
   const [loading, setLoading]       = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
-  const [fetching, setFetching]     = useState(false)
   const [error, setError]           = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
@@ -157,38 +156,12 @@ export function Reddit() {
     fetchRedditStats().then(setStats).catch(() => {})
   }, [subreddit, sort, load])
 
-  async function handleFetch() {
-    if (fetching) return
-    setFetching(true)
-    try {
-      await triggerRedditFetch()
-      await load(subreddit, sort, 0)
-      const s = await fetchRedditStats()
-      setStats(s)
-    } catch {
-      setError('Fetch fehlgeschlagen')
-    } finally {
-      setFetching(false)
-    }
-  }
-
   const hasMore = posts.length < total
 
   return (
     <div>
       <div className="flex items-center justify-between gap-4 mb-4 flex-wrap">
         <h2 className="text-base font-semibold text-slate-200">Reddit · KI-Community</h2>
-        <button
-          type="button"
-          onClick={handleFetch}
-          disabled={fetching}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-slate-700 hover:border-slate-500 text-slate-300 hover:text-slate-100 text-xs disabled:opacity-50 transition-colors"
-        >
-          {fetching
-            ? <span className="w-3 h-3 border-2 border-slate-500 border-t-slate-300 rounded-full animate-spin" />
-            : <span aria-hidden>↻</span>}
-          Aktualisieren
-        </button>
       </div>
 
       {stats.length > 0 && <StatsBar stats={stats} />}

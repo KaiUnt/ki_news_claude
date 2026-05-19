@@ -762,25 +762,3 @@ def import_reddit_posts(
     return {"fetched": len(payload.posts), "new_saved": new_saved}
 
 
-_reddit_fetch_lock = threading.Lock()
-
-
-@app.post("/api/reddit/fetch")
-def trigger_reddit_fetch():
-    if not _reddit_fetch_lock.acquire(blocking=False):
-        raise HTTPException(status_code=409, detail="Reddit fetch already running")
-    try:
-        fetcher = RedditFetcher()
-        posts = fetcher.fetch()
-        new_saved = 0
-        with Session(engine) as session:
-            existing = set(session.exec(select(RedditPost.reddit_id)).all())
-            for post in posts:
-                if post.reddit_id not in existing:
-                    session.add(post)
-                    existing.add(post.reddit_id)
-                    new_saved += 1
-            session.commit()
-        return {"fetched": len(posts), "new_saved": new_saved}
-    finally:
-        _reddit_fetch_lock.release()
