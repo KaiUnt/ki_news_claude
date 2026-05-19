@@ -3,7 +3,7 @@ import threading
 from datetime import datetime, date, time, timedelta, timezone
 from typing import Optional
 from dateutil import tz
-from fastapi import FastAPI, Query, HTTPException
+from fastapi import FastAPI, Query, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
@@ -165,6 +165,25 @@ def _profile_to_dict(p: UserProfile) -> dict:
 class ProfileUpdate(BaseModel):
     name: Optional[str] = None
     priority_prompt: Optional[str] = None
+
+
+class RedditPostImport(BaseModel):
+    reddit_id: str
+    subreddit: str
+    title: str
+    permalink: str
+    external_url: str = ""
+    is_self: bool = False
+    score: int = 0
+    upvote_ratio: float = 0.0
+    num_comments: int = 0
+    flair: Optional[str] = None
+    sentiment: str = "neutral"
+    created_utc: str
+
+
+class RedditImportPayload(BaseModel):
+    posts: list[RedditPostImport]
 
 
 # ── Story endpoints ───────────────────────────────────────────────────────────
@@ -707,6 +726,40 @@ def reddit_stats():
             }
             for r in rows
         ]
+
+
+@app.post("/api/reddit/import")
+def import_reddit_posts(
+    payload: RedditImportPayload,
+    authorization: Optional[str] = Header(None),
+):
+    secret = settings.reddit_import_secret
+    if not secret or authorization != f"Bearer {secret}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    new_saved = 0
+    with Session(engine) as session:
+        existing = set(session.exec(select(RedditPost.reddit_id)).all())
+        for p in payload.posts:
+            if p.reddit_id not in existing:
+                session.add(RedditPost(
+                    reddit_id=p.reddit_id,
+                    subreddit=p.subreddit,
+                    title=p.title,
+                    permalink=p.permalink,
+                    external_url=p.external_url,
+                    is_self=p.is_self,
+                    score=p.score,
+                    upvote_ratio=p.upvote_ratio,
+                    num_comments=p.num_comments,
+                    flair=p.flair,
+                    sentiment=p.sentiment,
+                    created_utc=datetime.fromisoformat(p.created_utc),
+                ))
+                existing.add(p.reddit_id)
+                new_saved += 1
+        session.commit()
+    return {"fetched": len(payload.posts), "new_saved": new_saved}
 
 
 _reddit_fetch_lock = threading.Lock()

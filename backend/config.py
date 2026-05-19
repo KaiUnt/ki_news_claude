@@ -222,6 +222,7 @@ class Settings:
     hackernews_fetch_multiplier: int = int(os.getenv("HN_FETCH_MULTIPLIER", "4"))
     hackernews_min_points: int = int(os.getenv("HN_MIN_POINTS", "3"))
     hackernews_min_comments: int = int(os.getenv("HN_MIN_COMMENTS", "1"))
+    reddit_import_secret: str = os.getenv("REDDIT_IMPORT_SECRET", "")
 
 
 settings = Settings()

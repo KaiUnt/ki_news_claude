@@ -1,0 +1,25 @@
+name: Reddit Fetch
+
+on:
+  schedule:
+    - cron: '0 6 * * *'   # täglich 06:00 UTC
+  workflow_dispatch:        # manuell auslösbar
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Fetch Reddit & push to server
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+          REDDIT_IMPORT_SECRET: ${{ secrets.REDDIT_IMPORT_SECRET }}
+        run: python scripts/reddit_github_fetch.py
