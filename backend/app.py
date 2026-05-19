@@ -19,7 +19,7 @@ from .deduplicator import deduplicate, content_hash
 from .clusterer import cluster_articles
 from .summarizer import Summarizer
 from . import digest_generator
-from .config import STORY_TYPES, STORY_DOMAINS, STORY_FLAGS, normalize_tags
+from .config import STORY_TYPES, STORY_DOMAINS, STORY_FLAGS, normalize_tags, settings
 from .source_catalog import list_source_configs, story_signals_for_source_names, PAPER_SOURCES
 
 logger = logging.getLogger(__name__)
