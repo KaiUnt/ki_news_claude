@@ -8,8 +8,18 @@ import os
 import sys
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 import requests
+
+# .env laden falls vorhanden (lokal auf Mac, nicht in GitHub Actions)
+_env_file = Path(__file__).parent.parent / ".env"
+if _env_file.exists():
+    for line in _env_file.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, _, v = line.partition("=")
+            os.environ.setdefault(k.strip(), v.strip())
 
 SUBREDDITS = ["anthropic", "openai", "CopilotStudio", "AIAgentsinAction", "singularity"]
 SORTS = [("hot", {}), ("top", {"t": "day"})]
@@ -91,7 +101,7 @@ def main() -> None:
     r = requests.post(
         f"{backend_url}/api/reddit/import",
         json={"posts": posts},
-        headers={"Authorization": f"Bearer {import_secret}"},
+        headers={"X-Import-Secret": import_secret},
         auth=basic_auth,
         timeout=30,
     )

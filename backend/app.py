@@ -731,10 +731,10 @@ def reddit_stats():
 @app.post("/api/reddit/import")
 def import_reddit_posts(
     payload: RedditImportPayload,
-    authorization: Optional[str] = Header(None),
+    x_import_secret: Optional[str] = Header(None),
 ):
     secret = settings.reddit_import_secret
-    if not secret or authorization != f"Bearer {secret}":
+    if not secret or x_import_secret != secret:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     new_saved = 0
