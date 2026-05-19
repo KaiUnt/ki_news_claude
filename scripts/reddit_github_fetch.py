@@ -66,10 +66,14 @@ def to_post(p: dict) -> dict | None:
 def main() -> None:
     backend_url = os.environ.get("BACKEND_URL", "").rstrip("/")
     import_secret = os.environ.get("REDDIT_IMPORT_SECRET", "")
+    basic_user = os.environ.get("KINEWS_BASIC_USER", "")
+    basic_pass = os.environ.get("KINEWS_BASIC_PASS", "")
 
     if not backend_url or not import_secret:
         print("ERROR: BACKEND_URL und REDDIT_IMPORT_SECRET müssen gesetzt sein.", flush=True)
         sys.exit(1)
+
+    basic_auth = (basic_user, basic_pass) if basic_user and basic_pass else None
 
     posts = []
     for sub in SUBREDDITS:
@@ -88,6 +92,7 @@ def main() -> None:
         f"{backend_url}/api/reddit/import",
         json={"posts": posts},
         headers={"Authorization": f"Bearer {import_secret}"},
+        auth=basic_auth,
         timeout=30,
     )
     r.raise_for_status()

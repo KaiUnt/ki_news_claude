@@ -22,4 +22,6 @@ jobs:
         env:
           BACKEND_URL: ${{ secrets.BACKEND_URL }}
           REDDIT_IMPORT_SECRET: ${{ secrets.REDDIT_IMPORT_SECRET }}
+          KINEWS_BASIC_USER: ${{ secrets.KINEWS_BASIC_USER }}
+          KINEWS_BASIC_PASS: ${{ secrets.KINEWS_BASIC_PASS }}
         run: python scripts/reddit_github_fetch.py
