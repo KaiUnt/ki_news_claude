@@ -1,7 +1,7 @@
 import type {
   StoriesResponse, StoryDetail, SourceConfig, Filters,
   DigestLatest, DigestSummary, UserProfile, FavoritesResponse, Story,
-  StoryKind,
+  StoryKind, RedditPostsResponse, RedditSubredditStats,
 } from './types'
 import type { TagSchema } from './tagSchema'
 
@@ -125,4 +125,35 @@ export async function addFavorite(storyId: number): Promise<Story> {
 export async function removeFavorite(storyId: number): Promise<void> {
   const res = await fetch(`${BASE}/favorites/${storyId}`, { method: 'DELETE' })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
+}
+
+export type RedditSortOrder = 'score' | 'date' | 'ratio' | 'comments'
+
+export async function fetchRedditPosts(
+  subreddit?: string,
+  sort: RedditSortOrder = 'score',
+  limit = 50,
+  offset = 0,
+  signal?: AbortSignal,
+): Promise<RedditPostsResponse> {
+  const params = new URLSearchParams()
+  if (subreddit) params.set('subreddit', subreddit)
+  params.set('sort', sort)
+  params.set('limit', String(limit))
+  params.set('offset', String(offset))
+  const res = await fetch(`${BASE}/reddit/posts?${params}`, { signal })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
+export async function fetchRedditStats(): Promise<RedditSubredditStats[]> {
+  const res = await fetch(`${BASE}/reddit/stats`)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
+export async function triggerRedditFetch(): Promise<{ fetched: number; new_saved: number }> {
+  const res = await fetch(`${BASE}/reddit/fetch`, { method: 'POST' })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
 }

@@ -6,6 +6,7 @@ import { HeaderTabs } from './components/HeaderTabs'
 import { Dashboard } from './components/Dashboard'
 import { Settings } from './components/Settings'
 import { Favorites } from './components/Favorites'
+import { Reddit } from './components/Reddit'
 import { useStories } from './hooks/useStories'
 import { useDigest } from './hooks/useDigest'
 import { useDashboardStories } from './hooks/useDashboardStories'
@@ -154,6 +155,8 @@ export default function App() {
             onToggleFavorite={handleToggleFavorite}
           />
         )}
+
+        {view === 'reddit' && <Reddit />}
 
         {view === 'settings' && <Settings />}
 

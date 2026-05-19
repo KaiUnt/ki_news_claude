@@ -9,11 +9,12 @@ from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select, Session, func, or_
 from .db import (
-    Article, Story, UserProfile, DailyDigest, FavoriteStory, create_db_and_tables, engine,
+    Article, Story, UserProfile, DailyDigest, FavoriteStory, RedditPost,
+    create_db_and_tables, engine,
     get_existing_urls, get_existing_hashes,
     get_unclustered_articles,
 )
-from .fetcher import RSSFetcher, HackerNewsFetcher, RawArticle
+from .fetcher import RSSFetcher, HackerNewsFetcher, RawArticle, RedditFetcher
 from .deduplicator import deduplicate, content_hash
 from .clusterer import cluster_articles
 from .summarizer import Summarizer
@@ -633,3 +634,100 @@ def _run_fetch(cluster: bool, summarize: bool, digest: bool) -> dict:
         "stories_summarized": summarized,
         "digest_id": digest_id,
     }
+
+
+# ── Reddit endpoints ──────────────────────────────────────────────────────────
+
+def _reddit_post_to_dict(p: RedditPost) -> dict:
+    return {
+        "id": p.id,
+        "reddit_id": p.reddit_id,
+        "subreddit": p.subreddit,
+        "title": p.title,
+        "permalink": p.permalink,
+        "external_url": p.external_url,
+        "is_self": p.is_self,
+        "score": p.score,
+        "upvote_ratio": p.upvote_ratio,
+        "num_comments": p.num_comments,
+        "flair": p.flair,
+        "sentiment": p.sentiment,
+        "created_utc": p.created_utc.isoformat() if p.created_utc else None,
+        "fetched_at": p.fetched_at.isoformat() if p.fetched_at else None,
+    }
+
+
+@app.get("/api/reddit/posts")
+def list_reddit_posts(
+    subreddit: Optional[str] = Query(None),
+    sort: str = Query("score", pattern="^(score|date|ratio|comments)$"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    with Session(engine) as session:
+        q = select(RedditPost)
+        if subreddit:
+            q = q.where(RedditPost.subreddit == subreddit)
+        if sort == "score":
+            q = q.order_by(RedditPost.score.desc())
+        elif sort == "ratio":
+            q = q.order_by(RedditPost.upvote_ratio.desc())
+        elif sort == "comments":
+            q = q.order_by(RedditPost.num_comments.desc())
+        else:
+            q = q.order_by(RedditPost.created_utc.desc())
+
+        total = session.exec(select(func.count()).select_from(q.subquery())).one()
+        posts = session.exec(q.offset(offset).limit(limit)).all()
+        return {
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+            "items": [_reddit_post_to_dict(p) for p in posts],
+        }
+
+
+@app.get("/api/reddit/stats")
+def reddit_stats():
+    with Session(engine) as session:
+        rows = session.exec(
+            select(
+                RedditPost.subreddit,
+                func.count(RedditPost.id).label("count"),
+                func.avg(RedditPost.score).label("avg_score"),
+                func.avg(RedditPost.upvote_ratio).label("avg_ratio"),
+            ).group_by(RedditPost.subreddit)
+        ).all()
+        return [
+            {
+                "subreddit": r.subreddit,
+                "count": r.count,
+                "avg_score": round(r.avg_score or 0, 1),
+                "avg_ratio": round(r.avg_ratio or 0, 3),
+            }
+            for r in rows
+        ]
+
+
+_reddit_fetch_lock = threading.Lock()
+
+
+@app.post("/api/reddit/fetch")
+def trigger_reddit_fetch():
+    if not _reddit_fetch_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="Reddit fetch already running")
+    try:
+        fetcher = RedditFetcher()
+        posts = fetcher.fetch()
+        new_saved = 0
+        with Session(engine) as session:
+            existing = set(session.exec(select(RedditPost.reddit_id)).all())
+            for post in posts:
+                if post.reddit_id not in existing:
+                    session.add(post)
+                    existing.add(post.reddit_id)
+                    new_saved += 1
+            session.commit()
+        return {"fetched": len(posts), "new_saved": new_saved}
+    finally:
+        _reddit_fetch_lock.release()

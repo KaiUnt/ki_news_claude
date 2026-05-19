@@ -53,7 +53,38 @@ export interface Filters {
   sort: SortOrder
 }
 
-export type View = 'dashboard' | 'all' | 'favorites' | 'settings'
+export type View = 'dashboard' | 'all' | 'favorites' | 'reddit' | 'settings'
+
+export interface RedditPost {
+  id: number
+  reddit_id: string
+  subreddit: string
+  title: string
+  permalink: string
+  external_url: string
+  is_self: boolean
+  score: number
+  upvote_ratio: number
+  num_comments: number
+  flair: string | null
+  sentiment: string
+  created_utc: string
+  fetched_at: string
+}
+
+export interface RedditPostsResponse {
+  total: number
+  offset: number
+  limit: number
+  items: RedditPost[]
+}
+
+export interface RedditSubredditStats {
+  subreddit: string
+  count: number
+  avg_score: number
+  avg_ratio: number
+}
 
 export interface DigestTopStory {
   rank: number

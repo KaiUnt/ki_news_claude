@@ -86,6 +86,24 @@ class FavoriteStory(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
 
+class RedditPost(SQLModel, table=True):
+    """A single post fetched from a subreddit via public .json endpoint."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    reddit_id: str = Field(unique=True, index=True)   # Reddit's own post ID, e.g. "abc123"
+    subreddit: str = Field(index=True)
+    title: str
+    permalink: str                                     # https://reddit.com/r/.../comments/...
+    external_url: str = Field(default="")             # linked article URL; empty for self-posts
+    is_self: bool = Field(default=False)
+    score: int = Field(default=0)
+    upvote_ratio: float = Field(default=0.0)
+    num_comments: int = Field(default=0)
+    flair: Optional[str] = None
+    sentiment: str = Field(default="neutral")         # sehr positiv | positiv | gemischt | kontrovers
+    created_utc: datetime
+    fetched_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 def _db_path() -> str:
     url = settings.database_url
     if url.startswith("sqlite:///"):
