@@ -17,7 +17,7 @@ from sqlmodel import Session, select, func, or_
 
 from .config import settings, split_tags
 from .db import Article, Story, DailyDigest, UserProfile, engine
-from .source_catalog import story_signals_for_source_names
+from .source_catalog import PAPER_SOURCES, story_signals_for_source_names
 from .claude_retry import call_with_retry
 
 
@@ -88,10 +88,23 @@ def generate(reuse_last_window: bool = False) -> Optional[DailyDigest]:
         if not recent_story_ids:
             return None
 
+        # Paper-only stories live in the dedicated Paper-Stream lane in the
+        # dashboard and must not surface as Top-Stories in the digest. A story
+        # qualifies as "non-paper" if it has at least one article from a
+        # non-paper source — mixed clusters (arXiv + TechCrunch reporting)
+        # stay eligible.
+        non_paper_story_ids = (
+            select(Article.story_id)
+            .where(Article.story_id.is_not(None))
+            .where(~Article.source_name.in_(list(PAPER_SOURCES)))
+            .distinct()
+        )
+
         story_query = (
             select(Story)
             .where(Story.id.in_(recent_story_ids))
             .where(Story.is_processed == True)
+            .where(Story.id.in_(non_paper_story_ids))
             # Exclude historic catch-all stories (often 20+ unrelated articles
             # piled into a single "Sonstiges" bucket by older cluster runs).
             .where(func.lower(Story.title_de) != "sonstiges")
