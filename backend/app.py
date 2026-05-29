@@ -467,6 +467,44 @@ def _digest_summary(d: DailyDigest) -> dict:
     }
 
 
+def _hydrate_digest(session: Session, digest: DailyDigest) -> dict:
+    story_ids = [t.get("story_id") for t in digest.top_stories if t.get("story_id")]
+    story_by_id: dict[int, Story] = {}
+    primaries: dict[int, str] = {}
+    favorite_ids: set[int] = set()
+    if story_ids:
+        stories = session.exec(select(Story).where(Story.id.in_(story_ids))).all()
+        story_by_id = {s.id: s for s in stories}
+        primaries = _batch_primary_titles(session, story_ids)
+        favorite_ids = _favorite_story_ids(session, story_ids)
+        source_map = _batch_story_articles(session, story_ids)
+    else:
+        source_map = {}
+
+    top_with_data = []
+    for entry in digest.top_stories:
+        sid = entry.get("story_id")
+        story = story_by_id.get(sid)
+        if story is None:
+            continue
+        top_with_data.append({
+            "rank": entry.get("rank"),
+            "why": entry.get("why"),
+            "story": _story_to_dict(
+                story,
+                sources=source_map.get(sid, []),
+                primary_title=primaries.get(sid),
+                is_favorite=sid in favorite_ids,
+            ),
+        })
+    top_with_data.sort(key=lambda x: x.get("rank") or 999)
+
+    return {
+        **_digest_summary(digest),
+        "top_stories": top_with_data,
+    }
+
+
 @app.get("/api/digest/latest")
 def get_latest_digest():
     with Session(engine) as session:
@@ -475,42 +513,16 @@ def get_latest_digest():
         ).first()
         if not digest:
             raise HTTPException(status_code=404, detail="No digest exists yet")
+        return _hydrate_digest(session, digest)
 
-        story_ids = [t.get("story_id") for t in digest.top_stories if t.get("story_id")]
-        story_by_id: dict[int, Story] = {}
-        primaries: dict[int, str] = {}
-        favorite_ids: set[int] = set()
-        if story_ids:
-            stories = session.exec(select(Story).where(Story.id.in_(story_ids))).all()
-            story_by_id = {s.id: s for s in stories}
-            primaries = _batch_primary_titles(session, story_ids)
-            favorite_ids = _favorite_story_ids(session, story_ids)
-            source_map = _batch_story_articles(session, story_ids)
-        else:
-            source_map = {}
 
-        top_with_data = []
-        for entry in digest.top_stories:
-            sid = entry.get("story_id")
-            story = story_by_id.get(sid)
-            if story is None:
-                continue
-            top_with_data.append({
-                "rank": entry.get("rank"),
-                "why": entry.get("why"),
-                "story": _story_to_dict(
-                    story,
-                    sources=source_map.get(sid, []),
-                    primary_title=primaries.get(sid),
-                    is_favorite=sid in favorite_ids,
-                ),
-            })
-        top_with_data.sort(key=lambda x: x.get("rank") or 999)
-
-    return {
-        **_digest_summary(digest),
-        "top_stories": top_with_data,
-    }
+@app.get("/api/digest/{digest_id}")
+def get_digest_by_id(digest_id: int):
+    with Session(engine) as session:
+        digest = session.get(DailyDigest, digest_id)
+        if not digest:
+            raise HTTPException(status_code=404, detail="Digest not found")
+        return _hydrate_digest(session, digest)
 
 
 @app.get("/api/digest")

@@ -53,7 +53,7 @@ export interface Filters {
   sort: SortOrder
 }
 
-export type View = 'dashboard' | 'all' | 'favorites' | 'reddit' | 'settings'
+export type View = 'dashboard' | 'all' | 'favorites' | 'reddit' | 'archive' | 'settings'
 
 export interface RedditPost {
   id: number

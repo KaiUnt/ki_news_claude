@@ -10,6 +10,7 @@ const TABS: { id: View; label: string }[] = [
   { id: 'all',       label: 'Alle Stories' },
   { id: 'favorites', label: 'Favoriten' },
   { id: 'reddit',    label: 'Reddit' },
+  { id: 'archive',   label: 'Verlauf' },
   { id: 'settings',  label: 'Settings' },
 ]
 

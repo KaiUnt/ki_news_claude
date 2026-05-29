@@ -7,10 +7,12 @@ import { Dashboard } from './components/Dashboard'
 import { Settings } from './components/Settings'
 import { Favorites } from './components/Favorites'
 import { Reddit } from './components/Reddit'
+import { DigestArchive } from './components/DigestArchive'
 import { useStories } from './hooks/useStories'
 import { useDigest } from './hooks/useDigest'
 import { useDashboardStories } from './hooks/useDashboardStories'
 import { useFavorites } from './hooks/useFavorites'
+import { useDigestArchive } from './hooks/useDigestArchive'
 import { usePersistedFilters } from './hooks/usePersistedFilters'
 import { usePersistedView } from './hooks/usePersistedView'
 import { addFavorite, fetchStats, removeFavorite, triggerFetch } from './api'
@@ -34,12 +36,14 @@ export default function App() {
   const [selectedStoryId, setSelectedStoryId] = useState<number | null>(null)
   const [favoriteRefreshKey, setFavoriteRefreshKey] = useState(0)
   const [dashboardRefreshKey, setDashboardRefreshKey] = useState(0)
+  const [archiveRefreshKey, setArchiveRefreshKey] = useState(0)
 
   const stories = useStories(filters)
   const digest  = useDigest()
   const researchStories = useDashboardStories('forschung', view === 'dashboard', dashboardRefreshKey)
   const paperStories = useDashboardStories('paper', view === 'dashboard', dashboardRefreshKey)
   const favorites = useFavorites(view === 'favorites', favoriteRefreshKey)
+  const archive = useDigestArchive(view === 'archive', archiveRefreshKey)
 
   useEffect(() => {
     fetchStats().then(setStats).catch(() => {})
@@ -53,6 +57,7 @@ export default function App() {
       stories.refresh()
       digest.refresh()
       setDashboardRefreshKey(k => k + 1)
+      setArchiveRefreshKey(k => k + 1)
       const s = await fetchStats()
       setStats(s)
     } catch {
@@ -73,6 +78,7 @@ export default function App() {
     researchStories.setStoryFavorite(story.id, next)
     paperStories.setStoryFavorite(story.id, next)
     favorites.setStoryFavorite(story.id, next)
+    archive.setStoryFavorite(story.id, next)
     setFavoriteRefreshKey(k => k + 1)
   }
 
@@ -157,6 +163,20 @@ export default function App() {
         )}
 
         {view === 'reddit' && <Reddit />}
+
+        {view === 'archive' && (
+          <DigestArchive
+            items={archive.items}
+            selectedId={archive.selectedId}
+            selected={archive.selected}
+            listLoading={archive.listLoading}
+            detailLoading={archive.detailLoading}
+            error={archive.error}
+            onSelectDigest={archive.selectDigest}
+            onSelectStory={setSelectedStoryId}
+            onToggleFavorite={handleToggleFavorite}
+          />
+        )}
 
         {view === 'settings' && <Settings />}
 

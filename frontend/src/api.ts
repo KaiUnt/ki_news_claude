@@ -86,6 +86,29 @@ export async function fetchDigestLatest(): Promise<DigestLatest | null> {
   return res.json()
 }
 
+export interface DigestListResponse {
+  offset: number
+  limit: number
+  items: DigestSummary[]
+}
+
+export async function fetchDigestList(
+  limit = 30,
+  offset = 0,
+  signal?: AbortSignal,
+): Promise<DigestListResponse> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  const res = await fetch(`${BASE}/digest?${params}`, { signal })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
+export async function fetchDigestById(id: number, signal?: AbortSignal): Promise<DigestLatest> {
+  const res = await fetch(`${BASE}/digest/${id}`, { signal })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
 export async function regenerateDigest(): Promise<DigestSummary> {
   const res = await fetch(`${BASE}/digest/regenerate`, { method: 'POST' })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
