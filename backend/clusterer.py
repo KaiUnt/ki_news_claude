@@ -9,12 +9,13 @@ import json
 import logging
 import anthropic
 from datetime import datetime, timedelta
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 logger = logging.getLogger(__name__)
 
 from .config import settings
 from .db import Article, Story, engine, get_open_stories
+from .source_catalog import get_source_metadata, story_signals_for_source_names
 from .claude_retry import call_with_retry
 
 BATCH_SIZE = 80  # articles per Claude call
@@ -31,6 +32,7 @@ Regeln:
 - Verschiedene Releases desselben Herstellers (z.B. "Claude 4.7 Release" vs "Claude Security Beta") sind eigene Stories.
 - DATUMSCHECK: Wenn ein Artikel ein Datum (published_at) Wochen/Monate vor dem first_seen einer offenen Story hat, ist es vermutlich ein älterer Backfill und gehört NICHT zur aktuellen Story — leg eine neue an.
 - Jedes wissenschaftliche Paper (ArXiv, HuggingFace Daily Papers) ist normalerweise eine eigene Story, außer ein News-Artikel berichtet direkt darüber.
+- Offene Stories mit dem Präfix [PAPER] sind reine Paper-Stories. Hänge NIEMALS einen Mainstream-News-Artikel an eine [PAPER]-Story — die bleibt eigenständig. (Ein Paper darf zu einer bestehenden News-Story stoßen, aber nicht umgekehrt.)
 - Story-Titel: kurz, auf Deutsch, max 7 Wörter (z.B. "GPT-5.5 Veröffentlichung", "Gemini 2.5 Flash Release"). Versionsnummern beibehalten.
 - story_id = null bedeutet: neue Story anlegen mit new_story_title.
 
@@ -44,13 +46,20 @@ def _fmt_date(dt: datetime | None) -> str:
     return dt.strftime("%Y-%m-%d") if dt else "?"
 
 
-def _call_claude(articles: list[Article], open_stories: list[Story]) -> list[dict]:
+def _call_claude(
+    articles: list[Article],
+    open_stories: list[Story],
+    paper_only_ids: set[int],
+) -> list[dict]:
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
     stories_block = "KEINE OFFENEN STORIES"
     if open_stories:
         stories_block = "\n".join(
-            f"{s.id} | {_fmt_date(s.first_seen)} | {s.title_de}" for s in open_stories
+            f"{s.id} | {_fmt_date(s.first_seen)} | "
+            f"{'[PAPER] ' if s.id in paper_only_ids else ''}{s.title_de} "
+            f"({s.source_count} Quellen)"
+            for s in open_stories
         )
 
     articles_block = "\n".join(
@@ -103,10 +112,22 @@ def cluster_articles(articles: list[Article]) -> dict[int, int]:
 
         with Session(engine) as session:
             open_stories = get_open_stories(session, days=3)
+            paper_only_ids = _paper_only_story_ids(
+                session, [s.id for s in open_stories if s.id is not None]
+            )
 
-        assignments = _call_claude_safe(batch, open_stories)
+        assignments = _call_claude_safe(batch, open_stories, paper_only_ids)
 
         with Session(engine) as session:
+            # Guard: Claude must never attach a mainstream-news article to a
+            # paper-only story (e.g. 5 "Meta AI pendant" articles got merged into
+            # a single-source arXiv paper, inflating its source_count and floating
+            # it to digest rank 1). Articles Claude lumped into the same wrong
+            # paper-story are rerouted together into one fresh story.
+            reroute_target = _reroute_paper_mismatches(
+                session, assignments, batch_by_id, paper_only_ids
+            )
+
             for assignment in assignments:
                 article_id = assignment.get("article_id")
                 story_id = assignment.get("story_id")
@@ -114,6 +135,10 @@ def cluster_articles(articles: list[Article]) -> dict[int, int]:
 
                 if not article_id:
                     continue
+
+                if article_id in reroute_target:
+                    story_id = reroute_target[article_id]
+                    new_title = None
 
                 if story_id:
                     # Update existing story's source_count; refresh last_updated
@@ -146,12 +171,12 @@ def cluster_articles(articles: list[Article]) -> dict[int, int]:
     return result
 
 
-def _create_story(session: Session, title_de: str) -> int:
+def _create_story(session: Session, title_de: str, source_count: int = 1) -> int:
     story = Story(
         title_de=title_de,
         first_seen=datetime.utcnow(),
         last_updated=datetime.utcnow(),
-        source_count=1,
+        source_count=source_count,
         is_processed=False,
     )
     session.add(story)
@@ -160,9 +185,81 @@ def _create_story(session: Session, title_de: str) -> int:
     return story.id
 
 
-def _call_claude_safe(articles: list[Article], open_stories: list[Story]) -> list[dict]:
+def _paper_only_story_ids(session: Session, story_ids: list[int]) -> set[int]:
+    """Return the subset of story_ids whose sources are *all* paper-feeds."""
+    if not story_ids:
+        return set()
+    rows = session.exec(
+        select(Article.story_id, Article.source_name).where(
+            Article.story_id.in_(story_ids)
+        )
+    ).all()
+    names_by_story: dict[int, list[str]] = {}
+    for story_id, source_name in rows:
+        if story_id is not None:
+            names_by_story.setdefault(story_id, []).append(source_name)
+    return {
+        sid
+        for sid, names in names_by_story.items()
+        if story_signals_for_source_names(names)["story_kind"] == "paper"
+    }
+
+
+def _compute_reroute(
+    assignments: list[dict],
+    batch_by_id: dict[int, Article],
+    paper_only_ids: set[int],
+) -> dict[int, list[int]]:
+    """Group article_ids that Claude wrongly attached to a paper-only story.
+
+    Pure (no DB) so it can be unit-tested. Returns {bad_story_id: [article_id, ...]}
+    for non-paper articles assigned to a paper-only story.
+    """
+    reroute: dict[int, list[int]] = {}
+    for assignment in assignments:
+        story_id = assignment.get("story_id")
+        article_id = assignment.get("article_id")
+        if story_id not in paper_only_ids:
+            continue
+        article = batch_by_id.get(article_id)
+        if article is None:
+            continue
+        if get_source_metadata(article.source_name)["story_kind"] != "paper":
+            reroute.setdefault(story_id, []).append(article_id)
+    return reroute
+
+
+def _reroute_paper_mismatches(
+    session: Session,
+    assignments: list[dict],
+    batch_by_id: dict[int, Article],
+    paper_only_ids: set[int],
+) -> dict[int, int]:
+    """Create one fresh story per wrongly-targeted paper-story and return
+    {article_id: new_story_id} for the rerouted articles.
+
+    New stories start at source_count=0 — the main loop increments per article.
+    """
+    reroute = _compute_reroute(assignments, batch_by_id, paper_only_ids)
+    reroute_target: dict[int, int] = {}
+    for bad_story_id, article_ids in reroute.items():
+        title = batch_by_id[article_ids[0]].title[:60]
+        new_sid = _create_story(session, title, source_count=0)
+        for article_id in article_ids:
+            reroute_target[article_id] = new_sid
+        logger.warning(
+            "[Clusterer] Reroute: %d non-paper article(s) Claude assigned to "
+            "paper-only story %d → new story %d (%r)",
+            len(article_ids), bad_story_id, new_sid, title,
+        )
+    return reroute_target
+
+
+def _call_claude_safe(
+    articles: list[Article], open_stories: list[Story], paper_only_ids: set[int]
+) -> list[dict]:
     try:
-        return _call_claude(articles, open_stories)
+        return _call_claude(articles, open_stories, paper_only_ids)
     except (json.JSONDecodeError, Exception) as exc:
         logger.error("[Clusterer] Error: %s — falling back to solo stories", exc)
         # Fallback: each article gets its own story
