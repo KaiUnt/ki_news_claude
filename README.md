@@ -4,12 +4,12 @@ Persönliches Dashboard für tägliche KI-News aus RSS-Feeds, Hacker News und Re
 
 ## Features
 
-- **Quellen:** 23 RSS-Feeds (OpenAI, Anthropic, DeepMind, Google AI, NVIDIA, Microsoft Research/AI, HuggingFace, ArXiv cs.AI/cs.LG/cs.CL, TechCrunch AI, The Decoder, Heise KI, EU AI Act, …) + Hacker News + Reddit
+- **Quellen:** 30 RSS-Feeds (OpenAI, Anthropic, DeepMind, Google AI/Gemini/Research, NVIDIA, Microsoft Research/AI, AWS ML, HuggingFace, ArXiv cs.AI/cs.LG/cs.CL, TechCrunch AI, VentureBeat AI, MIT Tech Review, Wired AI, The Decoder, Heise KI, Golem KI, t3n KI, EU AI Act, Simon Willison, Interconnects, Latent Space, Ahead of AI) + Hacker News + Reddit
 - **Pipeline:** Fetch → Dedup → Clustering (Claude) → Summary (Claude) → Tages-Digest (Claude)
 - **Story-Clustering:** mehrere Artikel über dasselbe Ereignis werden zu einer Story zusammengefasst
 - **Tages-Digest:** Claude wählt 5–7 Top-Stories und schreibt eine 2–3-Absätze-Tageszusammenfassung — abgestimmt auf einen frei editierbaren Prioritäts-Prompt
 - **Reddit-Bereich:** Posts aus 5 KI-Subreddits, getrennt vom Digest, mit Sentiment-Berechnung via Upvote-Ratio
-- **Frontend:** React 19 + Tailwind 4, vier Views (Dashboard / Alle Stories / Favoriten / Reddit / Settings), Tab-Wahl persistent
+- **Frontend:** React 19 + Tailwind 4, fünf Views (Dashboard / Alle Stories / Favoriten / Reddit / Settings), Tab-Wahl persistent
 - **Kategorisierung (3 Achsen):** Typ (release · forschung · tool · infrastruktur · business · policy · demo), Domain (llm-core · coding · agenten · bild-video · audio · robotik · vertikal · sonstige), Flags (open-source · frontier · big-lab). ArXiv-Papers werden quellen-basiert als `story_kind=paper` separiert und überspringen das Content-Tagging.
 
 ## Stack
