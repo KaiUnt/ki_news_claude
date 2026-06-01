@@ -115,6 +115,12 @@ class RedditPost(SQLModel, table=True):
     fetched_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class SystemSetting(SQLModel, table=True):
+    """Persistent key-value store for runtime-configurable settings."""
+    key: str = Field(primary_key=True)
+    value: str
+
+
 def _db_path() -> str:
     url = settings.database_url
     if url.startswith("sqlite:///"):

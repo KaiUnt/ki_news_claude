@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import select, Session, func, or_
 from .db import (
     Article, Story, UserProfile, DailyDigest, FavoriteStory, RedditPost, ManagedSource,
+    SystemSetting,
     create_db_and_tables, engine,
     get_existing_urls, get_existing_hashes,
     get_unclustered_articles,
@@ -673,6 +674,12 @@ def _run_fetch(cluster: bool, summarize: bool, digest: bool) -> dict:
                     session.add(article)
             session.commit()
 
+    # Story-merge: consolidate semantic duplicates created by clustering
+    merged = 0
+    if cluster:
+        from .story_merger import merge_recent_stories
+        merged = merge_recent_stories()
+
     # Summarize
     summarized = 0
     if summarize and cluster:
@@ -693,6 +700,7 @@ def _run_fetch(cluster: bool, summarize: bool, digest: bool) -> dict:
         "fetched": len(raw),
         "new_saved": saved,
         "clustered": clustered,
+        "stories_merged": merged,
         "stories_summarized": summarized,
         "digest_id": digest_id,
     }
@@ -865,5 +873,43 @@ def delete_managed_source(source_id: int):
         session.delete(source)
         session.commit()
     return {"ok": True, "id": source_id}
+
+
+# ── System settings ───────────────────────────────────────────────────────────
+
+def _get_system_setting(key: str, default: str) -> str:
+    with Session(engine) as session:
+        row = session.get(SystemSetting, key)
+        return row.value if row else default
+
+
+def _set_system_setting(key: str, value: str) -> None:
+    with Session(engine) as session:
+        row = session.get(SystemSetting, key)
+        if row:
+            row.value = value
+        else:
+            row = SystemSetting(key=key, value=value)
+        session.add(row)
+        session.commit()
+
+
+class SystemSettingsUpdate(BaseModel):
+    story_merge_enabled: Optional[bool] = None
+
+
+@app.get("/api/admin/settings")
+def get_system_settings():
+    default_merge = "true" if settings.story_merge_enabled else "false"
+    merge_val = _get_system_setting("story_merge_enabled", default_merge)
+    return {"story_merge_enabled": merge_val == "true"}
+
+
+@app.patch("/api/admin/settings")
+def update_system_settings(body: SystemSettingsUpdate):
+    if body.story_merge_enabled is not None:
+        _set_system_setting("story_merge_enabled", "true" if body.story_merge_enabled else "false")
+    default_merge = "true" if settings.story_merge_enabled else "false"
+    return {"story_merge_enabled": _get_system_setting("story_merge_enabled", default_merge) == "true"}
 
 

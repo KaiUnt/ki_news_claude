@@ -26,7 +26,9 @@ _SYSTEM_PROMPT = """Du bist ein News-Clustering-Experte für KI-Nachrichten.
 Aufgabe: Ordne jeden neuen Artikel einer bestehenden Story zu, oder eröffne eine neue Story.
 
 Regeln:
-- Artikel über dasselbe Ereignis/Release/Thema → gleiche Story
+- Artikel über dasselbe Ereignis/Release/Thema → gleiche Story, auch wenn Titel oder Blickwinkel verschieden.
+  Beispiel: "RTX Spark: Laptop-CPU vorgestellt", "Nvidia greift Intel mit ARM-Chip an", "RTX Spark gegen AMD"
+  → alle zur selben Story, weil es dasselbe Produkt-Launch ist.
 - VERSIONSNUMMERN sind IMMER eigene Stories: GPT-5.4 ≠ GPT-5.5, Claude 4.6 ≠ Claude 4.7, Gemini 2.0 ≠ Gemini 2.5.
   Vergleiche die Versionsnummer im Artikel-Titel mit der in der offenen Story. Bei abweichender Version: NEUE Story.
 - Verschiedene Releases desselben Herstellers (z.B. "Claude 4.7 Release" vs "Claude Security Beta") sind eigene Stories.
@@ -62,14 +64,17 @@ def _call_claude(
             for s in open_stories
         )
 
-    articles_block = "\n".join(
-        f"{a.id} | {_fmt_date(a.published_at)} | {a.title[:100]} | {a.source_name}"
-        for a in articles
-    )
+    def _fmt_article(a: Article) -> str:
+        snippet = ""
+        if a.raw_content:
+            snippet = " | " + a.raw_content[:120].replace("\n", " ")
+        return f"{a.id} | {_fmt_date(a.published_at)} | {a.title[:100]} | {a.source_name}{snippet}"
+
+    articles_block = "\n".join(_fmt_article(a) for a in articles)
 
     user_msg = (
         f"OFFENE STORIES (letzte 3 Tage):\nID | first_seen | Titel\n{stories_block}\n\n"
-        f"NEUE ARTIKEL:\nID | published_at | Titel | Quelle\n{articles_block}"
+        f"NEUE ARTIKEL:\nID | published_at | Titel | Quelle | Snippet\n{articles_block}"
     )
 
     response = call_with_retry(lambda: client.messages.create(

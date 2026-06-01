@@ -145,3 +145,7 @@ export interface ManagedSource {
   active: boolean
   created_at: string
 }
+
+export interface SystemSettings {
+  story_merge_enabled: boolean
+}

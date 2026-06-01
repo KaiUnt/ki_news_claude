@@ -1,6 +1,72 @@
 import { useEffect, useState } from 'react'
-import { fetchSources, fetchManagedSources, createManagedSource, deleteManagedSource } from '../api'
-import type { SourceConfig, ManagedSource } from '../types'
+import { fetchSources, fetchManagedSources, createManagedSource, deleteManagedSource, fetchSystemSettings, updateSystemSettings } from '../api'
+import type { SourceConfig, ManagedSource, SystemSettings } from '../types'
+
+// ── System settings panel ─────────────────────────────────────────────────────
+
+function SystemSettingsPanel() {
+  const [settings, setSettings] = useState<SystemSettings | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    fetchSystemSettings().then(setSettings).catch(() => {})
+  }, [])
+
+  async function handleToggle(key: keyof SystemSettings) {
+    if (!settings) return
+    const next = { ...settings, [key]: !settings[key] }
+    setSettings(next)
+    setSaving(true)
+    try {
+      const saved = await updateSystemSettings({ [key]: next[key] })
+      setSettings(saved)
+    } catch {
+      setSettings(settings) // revert on error
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (!settings) return null
+
+  return (
+    <section className="bg-slate-900/40 border border-slate-800 rounded-2xl p-6">
+      <h3 className="text-sm uppercase tracking-[0.18em] text-slate-500 font-medium m-0 mb-1">
+        Verarbeitung
+      </h3>
+      <p className="text-xs text-slate-500 m-0 mb-5">
+        Steuerung der automatischen News-Pipeline.
+      </p>
+
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-sm text-slate-100 font-medium m-0">Story-Merge</p>
+            <p className="text-xs text-slate-500 m-0 mt-0.5">
+              Nach dem Clustering semantisch gleiche Stories automatisch zusammenführen.
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={settings.story_merge_enabled}
+            onClick={() => handleToggle('story_merge_enabled')}
+            disabled={saving}
+            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors disabled:opacity-50 ${
+              settings.story_merge_enabled ? 'bg-indigo-500' : 'bg-slate-700'
+            }`}
+          >
+            <span
+              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                settings.story_merge_enabled ? 'translate-x-4' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
+      </div>
+    </section>
+  )
+}
 
 // ── Source inventory (readonly) ───────────────────────────────────────────────
 
@@ -250,6 +316,8 @@ export function Settings() {
           Klassifizierung durch Claude.
         </p>
       </section>
+
+      <SystemSettingsPanel />
 
       <ManagedSourcesForm />
 

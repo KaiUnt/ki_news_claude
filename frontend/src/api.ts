@@ -1,7 +1,7 @@
 import type {
   StoriesResponse, StoryDetail, SourceConfig, Filters,
   DigestLatest, DigestSummary, UserProfile, FavoritesResponse, Story,
-  StoryKind, RedditPostsResponse, RedditSubredditStats, ManagedSource,
+  StoryKind, RedditPostsResponse, RedditSubredditStats, ManagedSource, SystemSettings,
 } from './types'
 import type { TagSchema } from './tagSchema'
 
@@ -200,5 +200,21 @@ export async function createManagedSource(
 export async function deleteManagedSource(id: number): Promise<void> {
   const res = await fetch(`${BASE}/admin/sources/${id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
+}
+
+export async function fetchSystemSettings(): Promise<SystemSettings> {
+  const res = await fetch(`${BASE}/admin/settings`)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
+export async function updateSystemSettings(patch: Partial<SystemSettings>): Promise<SystemSettings> {
+  const res = await fetch(`${BASE}/admin/settings`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
 }
 

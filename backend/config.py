@@ -241,5 +241,9 @@ class Settings:
     newsletter_imap_password: str = os.getenv("NEWSLETTER_IMAP_PASSWORD", "")
     newsletter_imap_folder: str = os.getenv("NEWSLETTER_IMAP_FOLDER", "Newsletter")
 
+    # Story-Merge: post-clustering deduplication of semantically identical stories
+    story_merge_enabled: bool = os.getenv("STORY_MERGE_ENABLED", "true").lower() == "true"
+    story_merge_hours: int = int(os.getenv("STORY_MERGE_HOURS", "24"))
+
 
 settings = Settings()
