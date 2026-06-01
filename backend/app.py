@@ -647,15 +647,26 @@ def _run_fetch(cluster: bool, summarize: bool, digest: bool) -> dict:
             except Exception:
                 session.rollback()
 
-    # Cluster
+    # Cluster — newsletter articles use a wider 8-day window so weekly
+    # newsletters can connect to RSS stories published up to 8 days ago.
+    # Non-newsletter articles use the standard 3-day window.
     clustered = 0
     if cluster:
         with Session(engine) as session:
             unclustered = get_unclustered_articles(session)
-        assignments = cluster_articles(unclustered)
-        clustered = len(assignments)
+
+        nl_articles    = [a for a in unclustered if a.source_type == "newsletter"]
+        other_articles = [a for a in unclustered if a.source_type != "newsletter"]
+
+        all_assignments: dict[int, int] = {}
+        if nl_articles:
+            all_assignments.update(cluster_articles(nl_articles, story_days=8))
+        if other_articles:
+            all_assignments.update(cluster_articles(other_articles, story_days=3))
+
+        clustered = len(all_assignments)
         with Session(engine) as session:
-            for article_id, story_id in assignments.items():
+            for article_id, story_id in all_assignments.items():
                 article = session.get(Article, article_id)
                 if article:
                     article.story_id = story_id

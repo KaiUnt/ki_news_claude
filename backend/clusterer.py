@@ -94,10 +94,14 @@ def _call_claude(
     return json.loads(raw)
 
 
-def cluster_articles(articles: list[Article]) -> dict[int, int]:
+def cluster_articles(articles: list[Article], story_days: int = 3) -> dict[int, int]:
     """
     Assigns each article to a story_id. Creates new Story records as needed.
     Returns {article_id: story_id}.
+
+    story_days: how far back to look for open stories. Use a larger value for
+    newsletter articles so weekly newsletters can connect to RSS stories that
+    were published up to story_days ago.
     """
     if not articles:
         return {}
@@ -111,7 +115,7 @@ def cluster_articles(articles: list[Article]) -> dict[int, int]:
         batch_by_id = {a.id: a for a in batch}
 
         with Session(engine) as session:
-            open_stories = get_open_stories(session, days=3)
+            open_stories = get_open_stories(session, days=story_days)
             paper_only_ids = _paper_only_story_ids(
                 session, [s.id for s in open_stories if s.id is not None]
             )
