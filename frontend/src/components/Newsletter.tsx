@@ -20,7 +20,7 @@ const EMPTY_FILTERS: Filters = {
 
 interface Props {
   onSelectStory: (id: number) => void
-  onToggleFavorite: (story: Story, next: boolean) => void
+  onToggleFavorite: (story: Story, next: boolean) => Promise<void>
 }
 
 export function Newsletter({ onSelectStory, onToggleFavorite }: Props) {
@@ -73,11 +73,11 @@ export function Newsletter({ onSelectStory, onToggleFavorite }: Props) {
 
   const hasMore = stories.length < total
 
-  function handleToggle(story: Story, next: boolean) {
+  async function handleToggle(story: Story, next: boolean): Promise<void> {
     setStories(prev =>
       prev.map(s => s.id === story.id ? { ...s, is_favorite: next } : s)
     )
-    onToggleFavorite(story, next)
+    await onToggleFavorite(story, next)
   }
 
   return (

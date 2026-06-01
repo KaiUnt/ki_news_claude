@@ -181,6 +181,8 @@ export default function App() {
             detailLoading={archive.detailLoading}
             error={archive.error}
             onSelectDigest={archive.selectDigest}
+            onSelectStory={setSelectedStoryId}
+            onToggleFavorite={handleToggleFavorite}
           />
         )}
 
