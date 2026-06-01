@@ -53,7 +53,7 @@ export interface Filters {
   sort: SortOrder
 }
 
-export type View = 'dashboard' | 'all' | 'favorites' | 'reddit' | 'archive' | 'settings'
+export type View = 'dashboard' | 'all' | 'favorites' | 'reddit' | 'newsletter' | 'archive' | 'settings'
 
 export interface RedditPost {
   id: number
@@ -135,4 +135,13 @@ export interface FavoriteWeek {
 
 export interface FavoritesResponse {
   weeks: FavoriteWeek[]
+}
+
+export interface ManagedSource {
+  id: number
+  name: string
+  source_type: 'rss' | 'newsletter'
+  url: string
+  active: boolean
+  created_at: string
 }

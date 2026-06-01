@@ -8,6 +8,7 @@ import { Settings } from './components/Settings'
 import { Favorites } from './components/Favorites'
 import { Reddit } from './components/Reddit'
 import { DigestArchive } from './components/DigestArchive'
+import { Newsletter } from './components/Newsletter'
 import { useStories } from './hooks/useStories'
 import { useDigest } from './hooks/useDigest'
 import { useDashboardStories } from './hooks/useDashboardStories'
@@ -164,6 +165,13 @@ export default function App() {
 
         {view === 'reddit' && <Reddit />}
 
+        {view === 'newsletter' && (
+          <Newsletter
+            onSelectStory={setSelectedStoryId}
+            onToggleFavorite={handleToggleFavorite}
+          />
+        )}
+
         {view === 'archive' && (
           <DigestArchive
             items={archive.items}
@@ -173,8 +181,6 @@ export default function App() {
             detailLoading={archive.detailLoading}
             error={archive.error}
             onSelectDigest={archive.selectDigest}
-            onSelectStory={setSelectedStoryId}
-            onToggleFavorite={handleToggleFavorite}
           />
         )}
 

@@ -28,6 +28,7 @@ STORY_FLAGS = [
     "open-source",
     "frontier",
     "big-lab",
+    "newsletter",
 ]
 
 # Heuristic mapping for stories tagged before the schema rewrite. Applied at
@@ -79,6 +80,15 @@ def split_tags(tags: list[str]) -> dict:
         elif t.startswith("flag:"):
             flags.append(t[len("flag:"):])
     return {"types": types, "domains": domains, "flags": flags}
+
+NEWSLETTER_SOURCES = [
+    {
+        "name": "KI-Newsletter Jens Polomski",
+        "from_email": "hello@jens.marketing",
+    },
+    # Weitere Newsletter hier eintragen:
+    # {"name": "Beispiel Newsletter", "from_email": "news@example.com"},
+]
 
 RSS_FEEDS = [
     # ── KI-Labs & Unternehmen ──────────────────────────────────────────────────
@@ -223,6 +233,13 @@ class Settings:
     hackernews_min_points: int = int(os.getenv("HN_MIN_POINTS", "3"))
     hackernews_min_comments: int = int(os.getenv("HN_MIN_COMMENTS", "1"))
     reddit_import_secret: str = os.getenv("REDDIT_IMPORT_SECRET", "")
+
+    # Newsletter / IMAP
+    newsletter_imap_host: str = os.getenv("NEWSLETTER_IMAP_HOST", "imap.gmx.net")
+    newsletter_imap_port: int = int(os.getenv("NEWSLETTER_IMAP_PORT", "993"))
+    newsletter_imap_user: str = os.getenv("NEWSLETTER_IMAP_USER", "")
+    newsletter_imap_password: str = os.getenv("NEWSLETTER_IMAP_PASSWORD", "")
+    newsletter_imap_folder: str = os.getenv("NEWSLETTER_IMAP_FOLDER", "Newsletter")
 
 
 settings = Settings()

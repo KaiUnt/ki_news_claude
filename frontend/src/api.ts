@@ -1,7 +1,7 @@
 import type {
   StoriesResponse, StoryDetail, SourceConfig, Filters,
   DigestLatest, DigestSummary, UserProfile, FavoritesResponse, Story,
-  StoryKind, RedditPostsResponse, RedditSubredditStats,
+  StoryKind, RedditPostsResponse, RedditSubredditStats, ManagedSource,
 } from './types'
 import type { TagSchema } from './tagSchema'
 
@@ -173,5 +173,32 @@ export async function fetchRedditStats(): Promise<RedditSubredditStats[]> {
   const res = await fetch(`${BASE}/reddit/stats`)
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.json()
+}
+
+export async function fetchManagedSources(): Promise<ManagedSource[]> {
+  const res = await fetch(`${BASE}/admin/sources`)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const data = await res.json()
+  return data.sources
+}
+
+export async function createManagedSource(
+  payload: { name: string; source_type: 'rss' | 'newsletter'; url: string }
+): Promise<ManagedSource> {
+  const res = await fetch(`${BASE}/admin/sources`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail ?? `HTTP ${res.status}`)
+  }
+  return res.json()
+}
+
+export async function deleteManagedSource(id: number): Promise<void> {
+  const res = await fetch(`${BASE}/admin/sources/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
 }
 

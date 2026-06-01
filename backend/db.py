@@ -86,6 +86,17 @@ class FavoriteStory(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
 
+class ManagedSource(SQLModel, table=True):
+    """User-added RSS feeds and newsletters, editable via the settings form."""
+    __tablename__ = "managedsource"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(unique=True, index=True)
+    source_type: str        # "rss" or "newsletter"
+    url: str = Field(default="")  # RSS: feed URL; newsletter: from_email
+    active: bool = Field(default=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class RedditPost(SQLModel, table=True):
     """A single post fetched from a subreddit via public .json endpoint."""
     id: Optional[int] = Field(default=None, primary_key=True)

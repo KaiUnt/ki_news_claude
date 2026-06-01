@@ -9,17 +9,17 @@ from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select, Session, func, or_
 from .db import (
-    Article, Story, UserProfile, DailyDigest, FavoriteStory, RedditPost,
+    Article, Story, UserProfile, DailyDigest, FavoriteStory, RedditPost, ManagedSource,
     create_db_and_tables, engine,
     get_existing_urls, get_existing_hashes,
     get_unclustered_articles,
 )
-from .fetcher import RSSFetcher, HackerNewsFetcher, RawArticle, RedditFetcher
+from .fetcher import RSSFetcher, HackerNewsFetcher, RawArticle, RedditFetcher, NewsletterFetcher
 from .deduplicator import deduplicate, content_hash
 from .clusterer import cluster_articles
 from .summarizer import Summarizer
 from . import digest_generator
-from .config import STORY_TYPES, STORY_DOMAINS, STORY_FLAGS, normalize_tags, settings
+from .config import STORY_TYPES, STORY_DOMAINS, STORY_FLAGS, normalize_tags, settings, RSS_FEEDS, NEWSLETTER_SOURCES
 from .source_catalog import list_source_configs, story_signals_for_source_names, PAPER_SOURCES
 
 logger = logging.getLogger(__name__)
@@ -422,7 +422,16 @@ def list_tags():
 
 @app.get("/api/sources")
 def list_sources():
-    return {"sources": list_source_configs()}
+    static = list_source_configs()
+    static_names = {s["name"] for s in static}
+    with Session(engine) as session:
+        managed = session.exec(select(ManagedSource)).all()
+    extra = [
+        {"name": s.name, "url": s.url, "type": s.source_type, "story_kind": "general"}
+        for s in managed if s.name not in static_names
+    ]
+    all_sources = sorted(static + extra, key=lambda s: s["name"].lower())
+    return {"sources": all_sources}
 
 
 # ── Profile endpoints ─────────────────────────────────────────────────────────
@@ -594,8 +603,19 @@ def trigger_fetch(
 
 
 def _run_fetch(cluster: bool, summarize: bool, digest: bool) -> dict:
-    # Fetch
-    fetchers = [RSSFetcher(), HackerNewsFetcher()]
+    # Load user-managed sources from DB and merge with built-in config lists
+    with Session(engine) as session:
+        managed = session.exec(
+            select(ManagedSource).where(ManagedSource.active == True)
+        ).all()
+    extra_rss = [{"name": s.name, "url": s.url} for s in managed if s.source_type == "rss"]
+    extra_nl  = [{"name": s.name, "from_email": s.url} for s in managed if s.source_type == "newsletter"]
+
+    fetchers = [
+        RSSFetcher(feeds=RSS_FEEDS + extra_rss),
+        HackerNewsFetcher(),
+        NewsletterFetcher(sources=NEWSLETTER_SOURCES + extra_nl),
+    ]
     raw: list[RawArticle] = []
     for f in fetchers:
         raw.extend(f.fetch())
@@ -772,5 +792,67 @@ def import_reddit_posts(
                 new_saved += 1
         session.commit()
     return {"fetched": len(payload.posts), "new_saved": new_saved}
+
+
+# ── Managed Sources (Settings-Form) ──────────────────────────────────────────
+
+class ManagedSourceCreate(BaseModel):
+    name: str
+    source_type: str   # "rss" or "newsletter"
+    url: str           # RSS: feed URL; newsletter: from_email
+
+
+def _managed_source_to_dict(s: ManagedSource) -> dict:
+    return {
+        "id": s.id,
+        "name": s.name,
+        "source_type": s.source_type,
+        "url": s.url,
+        "active": s.active,
+        "created_at": s.created_at.isoformat() if s.created_at else None,
+    }
+
+
+@app.get("/api/admin/sources")
+def list_managed_sources():
+    with Session(engine) as session:
+        sources = session.exec(
+            select(ManagedSource).order_by(ManagedSource.created_at)
+        ).all()
+    return {"sources": [_managed_source_to_dict(s) for s in sources]}
+
+
+@app.post("/api/admin/sources", status_code=201)
+def create_managed_source(body: ManagedSourceCreate):
+    if not body.name.strip() or not body.url.strip():
+        raise HTTPException(status_code=422, detail="Name und URL dürfen nicht leer sein.")
+    if body.source_type not in ("rss", "newsletter"):
+        raise HTTPException(status_code=422, detail="source_type muss 'rss' oder 'newsletter' sein.")
+
+    source = ManagedSource(
+        name=body.name.strip(),
+        source_type=body.source_type,
+        url=body.url.strip(),
+    )
+    with Session(engine) as session:
+        session.add(source)
+        try:
+            session.commit()
+            session.refresh(source)
+        except Exception:
+            session.rollback()
+            raise HTTPException(status_code=409, detail=f"Quelle '{body.name}' existiert bereits.")
+    return _managed_source_to_dict(source)
+
+
+@app.delete("/api/admin/sources/{source_id}")
+def delete_managed_source(source_id: int):
+    with Session(engine) as session:
+        source = session.get(ManagedSource, source_id)
+        if not source:
+            raise HTTPException(status_code=404, detail="Quelle nicht gefunden.")
+        session.delete(source)
+        session.commit()
+    return {"ok": True, "id": source_id}
 
 

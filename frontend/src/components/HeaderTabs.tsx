@@ -6,12 +6,13 @@ interface Props {
 }
 
 const TABS: { id: View; label: string }[] = [
-  { id: 'dashboard', label: 'Dashboard' },
-  { id: 'all',       label: 'Alle Stories' },
-  { id: 'favorites', label: 'Favoriten' },
-  { id: 'reddit',    label: 'Reddit' },
-  { id: 'archive',   label: 'Verlauf' },
-  { id: 'settings',  label: 'Settings' },
+  { id: 'dashboard',  label: 'Dashboard' },
+  { id: 'all',        label: 'Alle Stories' },
+  { id: 'favorites',  label: 'Favoriten' },
+  { id: 'reddit',     label: 'Reddit' },
+  { id: 'newsletter', label: 'Newsletter' },
+  { id: 'archive',    label: 'Verlauf' },
+  { id: 'settings',   label: 'Settings' },
 ]
 
 export function HeaderTabs({ view, onChange }: Props) {

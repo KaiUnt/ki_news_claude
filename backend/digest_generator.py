@@ -100,9 +100,19 @@ def generate(reuse_last_window: bool = False) -> Optional[DailyDigest]:
             .distinct()
         )
 
+        # Pure newsletter stories are excluded from the digest — they live in
+        # their own Newsletter view. Mixed clusters stay eligible.
+        non_newsletter_story_ids = list(session.exec(
+            select(Article.story_id)
+            .where(Article.story_id.is_not(None))
+            .where(Article.source_type != "newsletter")
+            .distinct()
+        ).all())
+
         story_query = (
             select(Story)
             .where(Story.id.in_(recent_story_ids))
+            .where(Story.id.in_(non_newsletter_story_ids))
             .where(Story.is_processed == True)
             .where(Story.id.in_(non_paper_story_ids))
             # Exclude historic catch-all stories (often 20+ unrelated articles

@@ -117,6 +117,7 @@ class Summarizer:
             best = max(articles, key=lambda a: len(a.raw_content or ""))
             signals = story_signals_for_source_names([a.source_name for a in articles])
             is_paper = signals["story_kind"] == "paper"
+            is_newsletter = all(a.source_type == "newsletter" for a in articles)
 
             if is_paper:
                 result = self._call_paper(story, best)
@@ -124,6 +125,9 @@ class Summarizer:
             else:
                 result = self._call_general(story, best)
                 new_tags = _build_tags(result)
+
+            if is_newsletter and "flag:newsletter" not in new_tags:
+                new_tags.append("flag:newsletter")
 
             if result.get("summary_de") is None:
                 continue

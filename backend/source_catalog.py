@@ -13,7 +13,7 @@ content tags already express, and have been removed.
 """
 from typing import Literal, TypedDict
 
-from .config import RSS_FEEDS
+from .config import RSS_FEEDS, NEWSLETTER_SOURCES
 
 StoryKind = Literal["general", "paper"]
 
@@ -52,6 +52,13 @@ def _build_catalog() -> dict[str, SourceMetadata]:
         "type": "hackernews",
         "story_kind": "general",
     }
+    for nl in NEWSLETTER_SOURCES:
+        catalog[nl["name"]] = {
+            "name": nl["name"],
+            "url": nl["from_email"],
+            "type": "newsletter",
+            "story_kind": "general",
+        }
     return catalog
 
 

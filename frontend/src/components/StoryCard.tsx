@@ -9,7 +9,11 @@ function relativeTime(iso: string): string {
   if (h < 1)  return 'vor wenigen Minuten'
   if (h < 24) return `vor ${h}h`
   if (d < 7)  return `vor ${d}d`
-  return new Date(iso).toLocaleDateString('de-AT', { day: '2-digit', month: '2-digit' })
+  return new Date(iso).toLocaleDateString('de-AT', { day: '2-digit', month: '2-digit', year: 'numeric' })
+}
+
+function shortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('de-AT', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
 interface Props {
@@ -67,6 +71,8 @@ export function StoryCard({ story, onSelect, onToggleFavorite }: Props) {
 
       <div className="text-xs text-slate-500 mt-auto pt-2 border-t border-slate-700/50 -mx-4 px-4 flex items-center gap-1.5">
         <span>{story.source_count} {story.source_count === 1 ? 'Quelle' : 'Quellen'}</span>
+        <span className="text-slate-600">·</span>
+        <span title={story.first_seen}>{shortDate(story.first_seen)}</span>
         <span className="text-slate-600">·</span>
         <span className="text-indigo-400/70">Details ansehen →</span>
       </div>
