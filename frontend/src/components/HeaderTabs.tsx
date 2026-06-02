@@ -9,7 +9,6 @@ const TABS: { id: View; label: string }[] = [
   { id: 'dashboard',  label: 'Dashboard' },
   { id: 'all',        label: 'Alle Stories' },
   { id: 'favorites',  label: 'Favoriten' },
-  { id: 'teams',      label: 'Teams Post' },
   { id: 'reddit',     label: 'Reddit' },
   { id: 'newsletter', label: 'Newsletter' },
   { id: 'archive',    label: 'Verlauf' },

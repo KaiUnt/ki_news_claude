@@ -5,7 +5,6 @@ import { StoryDetailModal } from './components/StoryDetailModal'
 import { HeaderTabs } from './components/HeaderTabs'
 import { Dashboard } from './components/Dashboard'
 import { Settings } from './components/Settings'
-import { Favorites } from './components/Favorites'
 import { Reddit } from './components/Reddit'
 import { DigestArchive } from './components/DigestArchive'
 import { Newsletter } from './components/Newsletter'
@@ -13,7 +12,6 @@ import { TeamsPost } from './components/TeamsPost'
 import { useStories } from './hooks/useStories'
 import { useDigest } from './hooks/useDigest'
 import { useDashboardStories } from './hooks/useDashboardStories'
-import { useFavorites } from './hooks/useFavorites'
 import { useDigestArchive } from './hooks/useDigestArchive'
 import { usePersistedFilters } from './hooks/usePersistedFilters'
 import { usePersistedView } from './hooks/usePersistedView'
@@ -36,7 +34,6 @@ export default function App() {
   const [stats, setStats]                     = useState<{ total_stories: number; total_articles: number } | null>(null)
   const [refreshing, setRefreshing]           = useState(false)
   const [selectedStoryId, setSelectedStoryId] = useState<number | null>(null)
-  const [favoriteRefreshKey, setFavoriteRefreshKey] = useState(0)
   const [dashboardRefreshKey, setDashboardRefreshKey] = useState(0)
   const [archiveRefreshKey, setArchiveRefreshKey] = useState(0)
 
@@ -44,7 +41,6 @@ export default function App() {
   const digest  = useDigest()
   const researchStories = useDashboardStories('forschung', view === 'dashboard', dashboardRefreshKey)
   const paperStories = useDashboardStories('paper', view === 'dashboard', dashboardRefreshKey)
-  const favorites = useFavorites(view === 'favorites', favoriteRefreshKey)
   const archive = useDigestArchive(view === 'archive', archiveRefreshKey)
 
   useEffect(() => {
@@ -79,9 +75,7 @@ export default function App() {
     digest.setStoryFavorite(story.id, next)
     researchStories.setStoryFavorite(story.id, next)
     paperStories.setStoryFavorite(story.id, next)
-    favorites.setStoryFavorite(story.id, next)
     archive.setStoryFavorite(story.id, next)
-    setFavoriteRefreshKey(k => k + 1)
   }
 
   return (
@@ -154,15 +148,7 @@ export default function App() {
           />
         )}
 
-        {view === 'favorites' && (
-          <Favorites
-            weeks={favorites.weeks}
-            loading={favorites.loading}
-            error={favorites.error}
-            onSelectStory={setSelectedStoryId}
-            onToggleFavorite={handleToggleFavorite}
-          />
-        )}
+        {view === 'favorites' && <TeamsPost onToggleFavorite={handleToggleFavorite} />}
 
         {view === 'reddit' && <Reddit />}
 
@@ -188,8 +174,6 @@ export default function App() {
         )}
 
         {view === 'settings' && <Settings />}
-
-        {view === 'teams' && <TeamsPost />}
 
         {view === 'all' && (
           <>

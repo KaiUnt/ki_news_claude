@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import type { FavoriteWeek, Story, Source, Filters } from '../types'
-import { fetchFavorites, fetchStories, fetchStoryDetail } from '../api'
+import { fetchFavorites, fetchStories, fetchStoryDetail, addFavorite, removeFavorite } from '../api'
 import { FilterBar } from './FilterBar'
 import { StoryCard } from './StoryCard'
 import { StoryDetailModal } from './StoryDetailModal'
@@ -246,7 +246,11 @@ function TextBlock({
 // Main component
 // ---------------------------------------------------------------------------
 
-export function TeamsPost() {
+interface TeamsPostProps {
+  onToggleFavorite?: (story: Story, next: boolean) => Promise<void>
+}
+
+export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
   const [blocks, setBlocks] = useState<ContentBlock[]>([])
   const [storyMap, setStoryMap] = useState<Map<number, Story>>(new Map())
   const [selectedUrls, setSelectedUrls] = useState<Map<number, string>>(new Map())
@@ -265,6 +269,8 @@ export function TeamsPost() {
   const [moreStories, setMoreStories] = useState<Story[]>([])
   const [moreTotal, setMoreTotal] = useState(0)
   const [moreLoading, setMoreLoading] = useState(false)
+
+  const [editorOpen, setEditorOpen] = useState(false)
 
   const [header, setHeader] = useState('Hallo Kollegen,\n\nhier wieder die brandaktuellen News zum Thema KI:')
   const [footer, setFooter] = useState('Viel Spaß beim Lesen! 🤖')
@@ -487,25 +493,55 @@ export function TeamsPost() {
   // Render
   // ---------------------------------------------------------------------------
 
+  const gridCols = editorOpen ? 'grid-cols-2' : 'grid-cols-3'
+
+  async function handleLocalToggleFavorite(story: Story, next: boolean) {
+    if (next) {
+      await addFavorite(story.id)
+    } else {
+      await removeFavorite(story.id)
+    }
+    setWeeks(prev => prev.map(w => ({
+      ...w,
+      items: next
+        ? w.items
+        : w.items.filter(i => i.story.id !== story.id),
+    })))
+    onToggleFavorite?.(story, next)
+  }
+
   return (
-    <div className="flex gap-6 h-[calc(100vh-9rem)] min-h-0">
-      {/* Left: Article selector */}
+    <div className={`flex gap-6 h-[calc(100vh-9rem)] min-h-0`}>
+      {/* Left: Article list */}
       <div className="flex-1 flex flex-col min-h-0">
-        {/* Shared FilterBar */}
-        <div className="shrink-0">
-          <FilterBar
-            filters={filters}
-            onChange={setFilters}
-            total={filteredWeeks.reduce((n, w) => n + w.items.length, 0)}
-          />
+        {/* FilterBar + Teams Post Button */}
+        <div className="shrink-0 flex items-start gap-3">
+          <div className="flex-1">
+            <FilterBar
+              filters={filters}
+              onChange={setFilters}
+              total={filteredWeeks.reduce((n, w) => n + w.items.length, 0)}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => setEditorOpen(o => !o)}
+            className={`mt-1 shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition-all ${
+              editorOpen
+                ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/40 hover:bg-slate-700/50'
+                : 'bg-slate-800 text-slate-300 border-slate-700 hover:border-indigo-500/60 hover:text-indigo-300'
+            }`}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
+            {editorOpen ? 'Editor schließen' : 'Teams Post erstellen'}
+          </button>
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-6 pb-4 mt-2">
           {/* Favoriten */}
           <section>
-            <h2 className="text-sm font-semibold text-slate-300 mb-3 flex items-center gap-2">
-              <span className="text-amber-400">★</span> Favoriten
-            </h2>
             {favLoading && (
               <div className="flex justify-center py-8">
                 <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
@@ -531,15 +567,25 @@ export function TeamsPost() {
                     <span className="ml-auto text-xs text-slate-600">{week.items.length}</span>
                   </button>
                   {isOpen && (
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className={`grid ${gridCols} gap-3`}>
                       {week.items.map(item => (
-                        <SelectableStoryCard
-                          key={item.story.id}
-                          story={item.story}
-                          isSelected={selectedStoryIds.includes(item.story.id)}
-                          onToggle={() => toggleStory(item.story.id, item.story)}
-                          onOpenDetail={setDetailStoryId}
-                        />
+                        editorOpen ? (
+                          <SelectableStoryCard
+                            key={item.story.id}
+                            story={item.story}
+                            isSelected={selectedStoryIds.includes(item.story.id)}
+                            onToggle={() => toggleStory(item.story.id, item.story)}
+                            onOpenDetail={setDetailStoryId}
+                          />
+                        ) : (
+                          <div key={item.story.id} className="relative group pt-2 pr-2">
+                            <StoryCard
+                              story={item.story}
+                              onSelect={setDetailStoryId}
+                              onToggleFavorite={handleLocalToggleFavorite}
+                            />
+                          </div>
+                        )
                       ))}
                     </div>
                   )}
@@ -568,15 +614,25 @@ export function TeamsPost() {
                     <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
                   </div>
                 )}
-                <div className="grid grid-cols-2 gap-3">
+                <div className={`grid ${gridCols} gap-3`}>
                   {moreStories.map(story => (
-                    <SelectableStoryCard
-                      key={story.id}
-                      story={story}
-                      isSelected={selectedStoryIds.includes(story.id)}
-                      onToggle={() => toggleStory(story.id, story)}
-                      onOpenDetail={setDetailStoryId}
-                    />
+                    editorOpen ? (
+                      <SelectableStoryCard
+                        key={story.id}
+                        story={story}
+                        isSelected={selectedStoryIds.includes(story.id)}
+                        onToggle={() => toggleStory(story.id, story)}
+                        onOpenDetail={setDetailStoryId}
+                      />
+                    ) : (
+                      <div key={story.id} className="relative group pt-2 pr-2">
+                        <StoryCard
+                          story={story}
+                          onSelect={setDetailStoryId}
+                          onToggleFavorite={handleLocalToggleFavorite}
+                        />
+                      </div>
+                    )
                   ))}
                 </div>
                 {!moreLoading && moreStories.length === 0 && (
@@ -588,8 +644,8 @@ export function TeamsPost() {
         </div>
       </div>
 
-      {/* Right: Block editor */}
-      <div className="w-[460px] shrink-0 flex flex-col min-h-0">
+      {/* Right: Block editor — only visible when editorOpen */}
+      {editorOpen && <div className="w-[460px] shrink-0 flex flex-col min-h-0">
 
         {/* Copy bar — outside scroll area so it never overlaps content */}
         <div className="flex-none pb-3 flex items-center justify-between">
@@ -752,7 +808,7 @@ export function TeamsPost() {
           </div>
         )}
         </div>{/* end scrollable content */}
-      </div>
+      </div>}{/* end editorOpen */}
 
       {detailStoryId !== null && (
         <StoryDetailModal storyId={detailStoryId} onClose={() => setDetailStoryId(null)} />
