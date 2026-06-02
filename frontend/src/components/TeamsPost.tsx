@@ -383,11 +383,13 @@ export function TeamsPost() {
   }
 
   function buildTeamsHtml(): string {
-    // Teams strips inline CSS margins — use <br> between sections for spacing instead
-    const sections: string[] = [
-      `<p>${esc(header).replace(/\n/g, '<br>')}</p>`,
-    ]
+    // Teams strips CSS margins — use explicit <br> for spacing.
+    // Rule: blank line between blocks UNLESS the previous block was a heading.
+    let html = `<p>${esc(header).replace(/\n/g, '<br>')}</p>`
+    let prevKind = 'header'
+
     for (const block of blocks) {
+      let section = ''
       if (block.kind === 'story') {
         const story = storyMap.get(block.storyId)
         if (!story) continue
@@ -397,15 +399,19 @@ export function TeamsPost() {
         let inner = `<strong>📌 ${esc(title)}</strong>`
         if (summary) inner += `<br><em>${esc(summary)}</em>`
         if (url) inner += `<br>🔗 ${esc(url)}`
-        sections.push(`<p>${inner}</p>`)
+        section = `<p>${inner}</p>`
       } else if (block.kind === 'heading' && block.content.trim()) {
-        sections.push(`<p><strong><span style="font-size:1.3em">${esc(block.content)}</span></strong></p>`)
+        section = `<p><strong><span style="font-size:1.3em">${esc(block.content)}</span></strong></p>`
       } else if (block.kind === 'text' && block.content.trim()) {
-        sections.push(`<p>${esc(block.content).replace(/\n/g, '<br>')}</p>`)
+        section = `<p>${esc(block.content).replace(/\n/g, '<br>')}</p>`
+      }
+      if (section) {
+        html += (prevKind === 'heading' ? '' : '<br>') + section
+        prevKind = block.kind
       }
     }
-    sections.push(`<p>${esc(footer).replace(/\n/g, '<br>')}</p>`)
-    return `<html><body>${sections.join('<br>')}</body></html>`
+    html += (prevKind === 'heading' ? '' : '<br>') + `<p>${esc(footer).replace(/\n/g, '<br>')}</p>`
+    return `<html><body>${html}</body></html>`
   }
 
   function buildTeamsText(): string {
