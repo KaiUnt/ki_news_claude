@@ -321,6 +321,36 @@ export function TeamsPost() {
     })
   }
 
+  function esc(s: string) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  }
+
+  function buildTeamsHtml(): string {
+    const wrap = (inner: string) => `<p style="margin:0 0 12px 0">${inner}</p>`
+    const parts: string[] = [
+      wrap(esc(header).replace(/\n/g, '<br>')),
+    ]
+    for (const block of blocks) {
+      if (block.kind === 'story') {
+        const story = storyMap.get(block.storyId)
+        if (!story) continue
+        const title = story.primary_title || story.title_de
+        const summary = story.summary_de
+        const url = selectedUrls.get(block.storyId) ?? story.primary_url ?? ''
+        let inner = `<strong>📌 ${esc(title)}</strong>`
+        if (summary) inner += `<br><em>${esc(summary)}</em>`
+        if (url) inner += `<br>🔗 ${esc(url)}`
+        parts.push(wrap(inner))
+      } else if (block.kind === 'heading' && block.content.trim()) {
+        parts.push(wrap(`<strong><span style="font-size:1.1em">${esc(block.content)}</span></strong>`))
+      } else if (block.kind === 'text' && block.content.trim()) {
+        parts.push(wrap(esc(block.content).replace(/\n/g, '<br>')))
+      }
+    }
+    parts.push(wrap(esc(footer).replace(/\n/g, '<br>')))
+    return `<html><body>${parts.join('')}</body></html>`
+  }
+
   function buildTeamsText(): string {
     const parts: string[] = [header]
     for (const block of blocks) {
@@ -344,10 +374,22 @@ export function TeamsPost() {
 
   async function handleCopy() {
     try {
-      await navigator.clipboard.writeText(buildTeamsText())
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/html': new Blob([buildTeamsHtml()], { type: 'text/html' }),
+          'text/plain': new Blob([buildTeamsText()], { type: 'text/plain' }),
+        }),
+      ])
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
-    } catch { /* fallback ignored */ }
+    } catch {
+      // Fallback: plain text only
+      try {
+        await navigator.clipboard.writeText(buildTeamsText())
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      } catch { /* ignore */ }
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -572,9 +614,31 @@ export function TeamsPost() {
         {blocks.length > 0 && (
           <div className="mt-4">
             <p className="text-xs text-slate-500 mb-1.5">Vorschau</p>
-            <pre className="whitespace-pre-wrap text-xs text-slate-300 bg-slate-800/60 border border-slate-700 rounded-lg p-3 leading-relaxed">
-              {buildTeamsText()}
-            </pre>
+            <div className="bg-slate-800/60 border border-slate-700 rounded-lg p-4 space-y-3 text-sm">
+              <p className="text-slate-300 whitespace-pre-wrap">{header}</p>
+              {blocks.map((block, i) => {
+                if (block.kind === 'story') {
+                  const story = storyMap.get(block.storyId)
+                  if (!story) return null
+                  const url = selectedUrls.get(block.storyId) ?? story.primary_url ?? ''
+                  return (
+                    <div key={i} className="space-y-0.5">
+                      <p className="font-bold text-slate-100">📌 {story.primary_title || story.title_de}</p>
+                      {story.summary_de && <p className="italic text-slate-400 text-xs leading-relaxed">{story.summary_de}</p>}
+                      {url && <p className="text-slate-500 text-xs">🔗 {url}</p>}
+                    </div>
+                  )
+                }
+                if (block.kind === 'heading' && block.content.trim()) {
+                  return <p key={i} className="text-base font-bold text-slate-100">{block.content}</p>
+                }
+                if (block.kind === 'text' && block.content.trim()) {
+                  return <p key={i} className="text-slate-300 whitespace-pre-wrap">{block.content}</p>
+                }
+                return null
+              })}
+              <p className="text-slate-300 whitespace-pre-wrap">{footer}</p>
+            </div>
           </div>
         )}
       </div>
