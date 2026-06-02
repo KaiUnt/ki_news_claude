@@ -397,7 +397,7 @@ export function TeamsPost() {
   // ---------------------------------------------------------------------------
 
   return (
-    <div className="flex gap-6 h-[calc(100vh-9rem)] overflow-hidden">
+    <div className="flex gap-6 h-[calc(100vh-9rem)] min-h-0">
       {/* Left: Article selector */}
       <div className="flex-1 overflow-y-auto pr-1 space-y-6 pb-4">
 
@@ -488,10 +488,10 @@ export function TeamsPost() {
       </div>
 
       {/* Right: Block editor */}
-      <div className="w-[460px] shrink-0 flex flex-col">
+      <div className="w-[460px] shrink-0 flex flex-col min-h-0">
 
         {/* Copy bar — outside scroll area so it never overlaps content */}
-        <div className="shrink-0 pb-3 flex items-center justify-between">
+        <div className="flex-none pb-3 flex items-center justify-between">
           <span className="text-xs text-slate-500">
             {selectedStoryIds.length === 0
               ? 'Noch keine Artikel ausgewählt'
@@ -512,7 +512,7 @@ export function TeamsPost() {
         </div>
 
         {/* Scrollable content */}
-        <div className="flex-1 overflow-y-auto flex flex-col gap-0 pb-4">
+        <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pb-4">
 
         {/* Header collapsible */}
         <div className="border border-slate-700 rounded-lg overflow-hidden">
