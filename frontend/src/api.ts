@@ -2,6 +2,7 @@ import type {
   StoriesResponse, StoryDetail, SourceConfig, Filters,
   DigestLatest, DigestSummary, UserProfile, FavoritesResponse, Story,
   StoryKind, RedditPostsResponse, RedditSubredditStats, ManagedSource, SystemSettings,
+  Category, PromptSetting,
 } from './types'
 import type { TagSchema } from './tagSchema'
 
@@ -183,7 +184,7 @@ export async function fetchManagedSources(): Promise<ManagedSource[]> {
 }
 
 export async function createManagedSource(
-  payload: { name: string; source_type: 'rss' | 'newsletter'; url: string }
+  payload: { name: string; source_type: 'rss' | 'newsletter'; url: string; category_id?: number | null }
 ): Promise<ManagedSource> {
   const res = await fetch(`${BASE}/admin/sources`, {
     method: 'POST',
@@ -197,9 +198,105 @@ export async function createManagedSource(
   return res.json()
 }
 
+export async function updateManagedSource(
+  id: number,
+  patch: { active?: boolean; category_id?: number | null; name?: string; url?: string }
+): Promise<ManagedSource> {
+  const res = await fetch(`${BASE}/admin/sources/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail ?? `HTTP ${res.status}`)
+  }
+  return res.json()
+}
+
 export async function deleteManagedSource(id: number): Promise<void> {
   const res = await fetch(`${BASE}/admin/sources/${id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
+}
+
+// ── Categories ──────────────────────────────────────────────────────────────
+
+export async function fetchCategories(): Promise<Category[]> {
+  const res = await fetch(`${BASE}/admin/categories`)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const data = await res.json()
+  return data.categories
+}
+
+export async function createCategory(
+  payload: { slug: string; name: string; icon?: string; color?: string; sort_order?: number; is_premium?: boolean }
+): Promise<Category> {
+  const res = await fetch(`${BASE}/admin/categories`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail ?? `HTTP ${res.status}`)
+  }
+  return res.json()
+}
+
+export async function updateCategory(
+  id: number,
+  patch: Partial<Pick<Category, 'name' | 'icon' | 'color' | 'sort_order' | 'is_premium' | 'active'>>
+): Promise<Category> {
+  const res = await fetch(`${BASE}/admin/categories/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
+export async function deleteCategory(id: number): Promise<void> {
+  const res = await fetch(`${BASE}/admin/categories/${id}`, { method: 'DELETE' })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail ?? `HTTP ${res.status}`)
+  }
+}
+
+// ── Prompts ─────────────────────────────────────────────────────────────────
+
+export async function fetchStoriesByCategory(
+  categorySlug: string,
+  limit = 8,
+  signal?: AbortSignal,
+): Promise<StoriesResponse> {
+  const params = new URLSearchParams({
+    category_slug: categorySlug,
+    sort: 'date_desc',
+    limit: String(limit),
+    offset: '0',
+  })
+  const res = await fetch(`${BASE}/stories?${params}`, { signal })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
+export async function fetchPrompts(): Promise<PromptSetting[]> {
+  const res = await fetch(`${BASE}/admin/prompts`)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const data = await res.json()
+  return data.prompts
+}
+
+export async function updatePrompt(key: string, value: string): Promise<PromptSetting> {
+  const res = await fetch(`${BASE}/admin/prompts/${key}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ value }),
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
 }
 
 export async function fetchSystemSettings(): Promise<SystemSettings> {

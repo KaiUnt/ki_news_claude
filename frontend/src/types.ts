@@ -141,10 +141,33 @@ export interface FavoritesResponse {
 export interface ManagedSource {
   id: number
   name: string
-  source_type: 'rss' | 'newsletter'
+  source_type: 'rss' | 'newsletter' | 'hackernews'
   url: string
   active: boolean
+  is_builtin: boolean
+  story_kind: 'general' | 'paper'
+  category_id: number | null
   created_at: string
+}
+
+export interface Category {
+  id: number
+  slug: string
+  name: string
+  icon: string | null
+  color: string | null
+  sort_order: number
+  is_premium: boolean
+  active: boolean
+  created_at: string
+}
+
+export interface PromptSetting {
+  key: string
+  name: string
+  description: string
+  value: string
+  updated_at: string
 }
 
 export interface SystemSettings {

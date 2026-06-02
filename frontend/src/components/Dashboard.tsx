@@ -1,4 +1,6 @@
-import type { DigestLatest, Story } from '../types'
+import { useEffect, useState } from 'react'
+import type { DigestLatest, Story, Category } from '../types'
+import { fetchCategories, fetchStoriesByCategory } from '../api'
 import { TopStoryCard } from './TopStoryCard'
 import { StoryCard } from './StoryCard'
 
@@ -15,6 +17,111 @@ interface Props {
   onSelectStory: (id: number) => void
   onToggleFavorite: (story: Story, next: boolean) => Promise<void>
 }
+
+// ── Per-category story sections ───────────────────────────────────────────────
+
+function CategoryStreamSection({
+  category,
+  topStoryIds,
+  onSelectStory,
+  onToggleFavorite,
+}: {
+  category: Category
+  topStoryIds: Set<number>
+  onSelectStory: (id: number) => void
+  onToggleFavorite: (story: Story, next: boolean) => Promise<void>
+}) {
+  const [stories, setStories] = useState<Story[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const ac = new AbortController()
+    setLoading(true)
+    fetchStoriesByCategory(category.slug, 8, ac.signal)
+      .then(data => {
+        if (!ac.signal.aborted) setStories(data.items)
+      })
+      .catch(() => {})
+      .finally(() => { if (!ac.signal.aborted) setLoading(false) })
+    return () => ac.abort()
+  }, [category.slug])
+
+  const visible = stories.filter(s => !topStoryIds.has(s.id))
+  if (!loading && visible.length === 0) return null
+
+  return (
+    <section>
+      <div className="flex items-center gap-2 mb-4">
+        <span
+          className="w-2 h-2 rounded-full"
+          style={{ background: category.color ?? '#6366f1' }}
+        />
+        <h2 className="text-sm uppercase tracking-wider text-slate-500 font-medium m-0">
+          {category.icon && <span className="mr-1.5">{category.icon}</span>}
+          {category.name}
+          {category.is_premium && (
+            <span className="ml-2 text-xs px-1.5 py-0.5 rounded border bg-yellow-500/10 text-yellow-400 border-yellow-500/30 normal-case tracking-normal">
+              Premium
+            </span>
+          )}
+        </h2>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-6">
+          <div className="w-5 h-5 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: category.color ?? '#6366f1', borderTopColor: 'transparent' }} />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+          {visible.map(story => (
+            <StoryCard
+              key={story.id}
+              story={story}
+              onSelect={onSelectStory}
+              onToggleFavorite={onToggleFavorite}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function CategoryStreams({
+  topStoryIds,
+  onSelectStory,
+  onToggleFavorite,
+}: {
+  topStoryIds: Set<number>
+  onSelectStory: (id: number) => void
+  onToggleFavorite: (story: Story, next: boolean) => Promise<void>
+}) {
+  const [categories, setCategories] = useState<Category[]>([])
+
+  useEffect(() => {
+    fetchCategories()
+      .then(cats => setCategories(cats.filter(c => c.active)))
+      .catch(() => {})
+  }, [])
+
+  if (categories.length === 0) return null
+
+  return (
+    <>
+      {categories.map(cat => (
+        <CategoryStreamSection
+          key={cat.id}
+          category={cat}
+          topStoryIds={topStoryIds}
+          onSelectStory={onSelectStory}
+          onToggleFavorite={onToggleFavorite}
+        />
+      ))}
+    </>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 function formatGeneratedAt(iso: string): string {
   return new Date(iso).toLocaleString('de-AT', {
@@ -190,6 +297,12 @@ export function Dashboard({
           </div>
         </div>
       </section>
+
+      <CategoryStreams
+        topStoryIds={topStoryIds}
+        onSelectStory={onSelectStory}
+        onToggleFavorite={onToggleFavorite}
+      />
     </div>
   )
 }

@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 from sqlmodel import Session, select, func, or_
 
 from .config import settings, split_tags
-from .db import Article, Story, DailyDigest, UserProfile, engine
+from .db import Article, Story, DailyDigest, UserProfile, engine, get_prompt
 from .source_catalog import PAPER_SOURCES, story_signals_for_source_names
 from .claude_retry import call_with_retry
 
@@ -153,6 +153,7 @@ def generate(reuse_last_window: bool = False) -> Optional[DailyDigest]:
 
         priority_prompt = profile.priority_prompt or ""
         profile_id = profile.id
+        system_prompt = get_prompt(session, "digest_curation", _SYSTEM_PROMPT)
 
     if not stories:
         return None
@@ -180,7 +181,7 @@ def generate(reuse_last_window: bool = False) -> Optional[DailyDigest]:
         f"{json.dumps(stories_payload, ensure_ascii=False, indent=2)}"
     )
 
-    call_result = _call_safe(user_msg)
+    call_result = _call_safe(user_msg, system_prompt)
     if call_result is None:
         # Claude failed — skip persistence so stories stay eligible for the next
         # run instead of being "burnt" by an empty fallback digest. window_start
@@ -236,7 +237,7 @@ def _compute_window_start(session: Session, reuse_last_window: bool) -> datetime
     return datetime.utcnow() - timedelta(hours=24)
 
 
-def _call_safe(user_msg: str) -> Optional[tuple[dict, Optional[str]]]:
+def _call_safe(user_msg: str, system_prompt: str = _SYSTEM_PROMPT) -> Optional[tuple[dict, Optional[str]]]:
     """Call Claude. On any error, return None so the caller skips persistence.
 
     Persisting an empty fallback digest would mark its top stories with
@@ -252,7 +253,7 @@ def _call_safe(user_msg: str) -> Optional[tuple[dict, Optional[str]]]:
             system=[
                 {
                     "type": "text",
-                    "text": _SYSTEM_PROMPT,
+                    "text": system_prompt,
                     "cache_control": {"type": "ephemeral"},
                 }
             ],

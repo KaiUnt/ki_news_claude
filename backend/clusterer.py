@@ -14,7 +14,7 @@ from sqlmodel import Session, select
 logger = logging.getLogger(__name__)
 
 from .config import settings
-from .db import Article, Story, engine, get_open_stories
+from .db import Article, Story, engine, get_open_stories, get_prompt
 from .source_catalog import get_source_metadata, story_signals_for_source_names
 from .claude_retry import call_with_retry
 
@@ -54,6 +54,8 @@ def _call_claude(
     paper_only_ids: set[int],
 ) -> list[dict]:
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    with Session(engine) as s:
+        system_prompt = get_prompt(s, "clusterer", _SYSTEM_PROMPT)
 
     stories_block = "KEINE OFFENEN STORIES"
     if open_stories:
@@ -83,7 +85,7 @@ def _call_claude(
         system=[
             {
                 "type": "text",
-                "text": _SYSTEM_PROMPT,
+                "text": system_prompt,
                 "cache_control": {"type": "ephemeral"},
             }
         ],

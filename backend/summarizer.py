@@ -14,7 +14,7 @@ from sqlmodel import Session, select
 logger = logging.getLogger(__name__)
 
 from .config import settings, STORY_TYPES, STORY_DOMAINS, STORY_FLAGS
-from .db import Article, Story, engine
+from .db import Article, Story, engine, get_prompt
 from .source_catalog import story_signals_for_source_names
 from .claude_retry import call_with_retry
 
@@ -150,7 +150,9 @@ class Summarizer:
             f"Artikel-Titel: {best_article.title}\n"
             f"Inhalt: {best_article.raw_content or '(kein Inhalt)'}"
         )
-        return self._call(user_content, _GENERAL_SYSTEM_PROMPT, max_tokens=512)
+        with Session(engine) as s:
+            prompt = get_prompt(s, "summarizer_general", _GENERAL_SYSTEM_PROMPT)
+        return self._call(user_content, prompt, max_tokens=512)
 
     def _call_paper(self, story: Story, best_article: Article) -> dict:
         user_content = (
@@ -158,7 +160,9 @@ class Summarizer:
             f"Quelle: {best_article.source_name}\n"
             f"Abstract / Inhalt: {best_article.raw_content or '(kein Inhalt)'}"
         )
-        return self._call(user_content, _PAPER_SYSTEM_PROMPT, max_tokens=256)
+        with Session(engine) as s:
+            prompt = get_prompt(s, "summarizer_paper", _PAPER_SYSTEM_PROMPT)
+        return self._call(user_content, prompt, max_tokens=256)
 
     def _call(self, user_content: str, system_prompt: str, max_tokens: int) -> dict:
         """Call Claude and return parsed JSON.

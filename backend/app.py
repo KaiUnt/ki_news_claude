@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import select, Session, func, or_
 from .db import (
     Article, Story, UserProfile, DailyDigest, FavoriteStory, RedditPost, ManagedSource,
-    SystemSetting,
+    SystemSetting, Category, PromptSetting,
     create_db_and_tables, engine,
     get_existing_urls, get_existing_hashes,
     get_unclustered_articles,
@@ -204,6 +204,7 @@ def list_stories(
     exclude_tags: Optional[str] = Query(None, description="Comma-separated tags to exclude"),
     sources: Optional[str] = Query(None, description="Filter by source_name (any article in story)"),
     story_kind: Optional[str] = Query(None, pattern="^(general|paper)$"),
+    category_slug: Optional[str] = Query(None, description="Filter stories whose sources belong to this category slug"),
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
     search: Optional[str] = Query(None),
@@ -254,8 +255,26 @@ def list_stories(
             )
             filters.append(Story.id.in_(source_subq))
 
+        if category_slug:
+            cat = session.exec(select(Category).where(Category.slug == category_slug)).first()
+            if cat:
+                cat_source_names = list(session.exec(
+                    select(ManagedSource.name).where(ManagedSource.category_id == cat.id)
+                ).all())
+                if cat_source_names:
+                    cat_story_subq = (
+                        select(Article.story_id)
+                        .where(Article.story_id.is_not(None))
+                        .where(Article.source_name.in_(cat_source_names))
+                        .distinct()
+                    )
+                    filters.append(Story.id.in_(cat_story_subq))
+
         if story_kind:
-            paper_sources = list(PAPER_SOURCES)
+            # Read paper source names from DB (story_kind="paper") for dynamic config
+            paper_sources = list(session.exec(
+                select(ManagedSource.name).where(ManagedSource.story_kind == "paper")
+            ).all()) or list(PAPER_SOURCES)
             non_paper_subq = (
                 select(Article.story_id)
                 .where(Article.story_id.is_not(None))
@@ -435,16 +454,11 @@ def list_tags():
 
 @app.get("/api/sources")
 def list_sources():
-    static = list_source_configs()
-    static_names = {s["name"] for s in static}
     with Session(engine) as session:
-        managed = session.exec(select(ManagedSource)).all()
-    extra = [
-        {"name": s.name, "url": s.url, "type": s.source_type, "story_kind": "general"}
-        for s in managed if s.name not in static_names
-    ]
-    all_sources = sorted(static + extra, key=lambda s: s["name"].lower())
-    return {"sources": all_sources}
+        sources = session.exec(
+            select(ManagedSource).order_by(ManagedSource.name)
+        ).all()
+    return {"sources": [_managed_source_to_dict(s) for s in sources]}
 
 
 # ── Profile endpoints ─────────────────────────────────────────────────────────
@@ -618,19 +632,22 @@ def trigger_fetch(
 
 
 def _run_fetch(cluster: bool, summarize: bool, digest: bool) -> dict:
-    # Load user-managed sources from DB and merge with built-in config lists
+    # All sources come from DB (seeded from config.py; user-added sources included automatically)
     with Session(engine) as session:
-        managed = session.exec(
+        active_sources = session.exec(
             select(ManagedSource).where(ManagedSource.active == True)
         ).all()
-    extra_rss = [{"name": s.name, "url": s.url} for s in managed if s.source_type == "rss"]
-    extra_nl  = [{"name": s.name, "from_email": s.url} for s in managed if s.source_type == "newsletter"]
+
+    rss_feeds = [{"name": s.name, "url": s.url} for s in active_sources if s.source_type == "rss"]
+    nl_sources = [{"name": s.name, "from_email": s.url} for s in active_sources if s.source_type == "newsletter"]
+    run_hn = any(s.source_type == "hackernews" for s in active_sources)
 
     fetchers = [
-        RSSFetcher(feeds=RSS_FEEDS + extra_rss),
-        HackerNewsFetcher(),
-        NewsletterFetcher(sources=NEWSLETTER_SOURCES + extra_nl),
+        RSSFetcher(feeds=rss_feeds),
+        NewsletterFetcher(sources=nl_sources),
     ]
+    if run_hn:
+        fetchers.append(HackerNewsFetcher())
     raw: list[RawArticle] = []
     for f in fetchers:
         raw.extend(f.fetch())
@@ -831,8 +848,16 @@ def import_reddit_posts(
 
 class ManagedSourceCreate(BaseModel):
     name: str
-    source_type: str   # "rss" or "newsletter"
-    url: str           # RSS: feed URL; newsletter: from_email
+    source_type: str            # "rss", "newsletter", "hackernews"
+    url: str                    # RSS: feed URL; newsletter: from_email; hackernews: ""
+    category_id: Optional[int] = None
+
+
+class ManagedSourceUpdate(BaseModel):
+    active: Optional[bool] = None
+    category_id: Optional[int] = None
+    name: Optional[str] = None
+    url: Optional[str] = None
 
 
 def _managed_source_to_dict(s: ManagedSource) -> dict:
@@ -842,6 +867,9 @@ def _managed_source_to_dict(s: ManagedSource) -> dict:
         "source_type": s.source_type,
         "url": s.url,
         "active": s.active,
+        "is_builtin": s.is_builtin,
+        "story_kind": s.story_kind,
+        "category_id": s.category_id,
         "created_at": s.created_at.isoformat() if s.created_at else None,
     }
 
@@ -850,22 +878,26 @@ def _managed_source_to_dict(s: ManagedSource) -> dict:
 def list_managed_sources():
     with Session(engine) as session:
         sources = session.exec(
-            select(ManagedSource).order_by(ManagedSource.created_at)
+            select(ManagedSource).order_by(ManagedSource.name)
         ).all()
     return {"sources": [_managed_source_to_dict(s) for s in sources]}
 
 
 @app.post("/api/admin/sources", status_code=201)
 def create_managed_source(body: ManagedSourceCreate):
-    if not body.name.strip() or not body.url.strip():
-        raise HTTPException(status_code=422, detail="Name und URL dürfen nicht leer sein.")
+    if not body.name.strip():
+        raise HTTPException(status_code=422, detail="Name darf nicht leer sein.")
     if body.source_type not in ("rss", "newsletter"):
         raise HTTPException(status_code=422, detail="source_type muss 'rss' oder 'newsletter' sein.")
+    if body.source_type != "hackernews" and not body.url.strip():
+        raise HTTPException(status_code=422, detail="URL darf nicht leer sein.")
 
     source = ManagedSource(
         name=body.name.strip(),
         source_type=body.source_type,
         url=body.url.strip(),
+        category_id=body.category_id,
+        is_builtin=False,
     )
     with Session(engine) as session:
         session.add(source)
@@ -878,12 +910,36 @@ def create_managed_source(body: ManagedSourceCreate):
     return _managed_source_to_dict(source)
 
 
+@app.patch("/api/admin/sources/{source_id}")
+def update_managed_source(source_id: int, body: ManagedSourceUpdate):
+    with Session(engine) as session:
+        source = session.get(ManagedSource, source_id)
+        if not source:
+            raise HTTPException(status_code=404, detail="Quelle nicht gefunden.")
+        if body.active is not None:
+            source.active = body.active
+        if body.category_id is not None:
+            source.category_id = body.category_id
+        # Name and URL only editable for non-builtin sources
+        if not source.is_builtin:
+            if body.name is not None:
+                source.name = body.name.strip()
+            if body.url is not None:
+                source.url = body.url.strip()
+        session.add(source)
+        session.commit()
+        session.refresh(source)
+        return _managed_source_to_dict(source)
+
+
 @app.delete("/api/admin/sources/{source_id}")
 def delete_managed_source(source_id: int):
     with Session(engine) as session:
         source = session.get(ManagedSource, source_id)
         if not source:
             raise HTTPException(status_code=404, detail="Quelle nicht gefunden.")
+        if source.is_builtin:
+            raise HTTPException(status_code=403, detail="Eingebaute Quellen können nicht gelöscht werden.")
         session.delete(source)
         session.commit()
     return {"ok": True, "id": source_id}
@@ -925,5 +981,152 @@ def update_system_settings(body: SystemSettingsUpdate):
         _set_system_setting("story_merge_enabled", "true" if body.story_merge_enabled else "false")
     default_merge = "true" if settings.story_merge_enabled else "false"
     return {"story_merge_enabled": _get_system_setting("story_merge_enabled", default_merge) == "true"}
+
+
+# ── Categories ────────────────────────────────────────────────────────────────
+
+class CategoryCreate(BaseModel):
+    slug: str
+    name: str
+    icon: Optional[str] = None
+    color: Optional[str] = None
+    sort_order: int = 0
+    is_premium: bool = False
+
+
+class CategoryUpdate(BaseModel):
+    name: Optional[str] = None
+    icon: Optional[str] = None
+    color: Optional[str] = None
+    sort_order: Optional[int] = None
+    is_premium: Optional[bool] = None
+    active: Optional[bool] = None
+
+
+def _category_to_dict(c: Category) -> dict:
+    return {
+        "id": c.id,
+        "slug": c.slug,
+        "name": c.name,
+        "icon": c.icon,
+        "color": c.color,
+        "sort_order": c.sort_order,
+        "is_premium": c.is_premium,
+        "active": c.active,
+        "created_at": c.created_at.isoformat() if c.created_at else None,
+    }
+
+
+@app.get("/api/admin/categories")
+def list_categories():
+    with Session(engine) as session:
+        cats = session.exec(
+            select(Category).order_by(Category.sort_order, Category.name)
+        ).all()
+    return {"categories": [_category_to_dict(c) for c in cats]}
+
+
+@app.post("/api/admin/categories", status_code=201)
+def create_category(body: CategoryCreate):
+    if not body.slug.strip() or not body.name.strip():
+        raise HTTPException(status_code=422, detail="Slug und Name dürfen nicht leer sein.")
+    cat = Category(
+        slug=body.slug.strip().lower(),
+        name=body.name.strip(),
+        icon=body.icon,
+        color=body.color,
+        sort_order=body.sort_order,
+        is_premium=body.is_premium,
+    )
+    with Session(engine) as session:
+        session.add(cat)
+        try:
+            session.commit()
+            session.refresh(cat)
+        except Exception:
+            session.rollback()
+            raise HTTPException(status_code=409, detail=f"Kategorie '{body.slug}' existiert bereits.")
+    return _category_to_dict(cat)
+
+
+@app.patch("/api/admin/categories/{category_id}")
+def update_category(category_id: int, body: CategoryUpdate):
+    with Session(engine) as session:
+        cat = session.get(Category, category_id)
+        if not cat:
+            raise HTTPException(status_code=404, detail="Kategorie nicht gefunden.")
+        if body.name is not None:
+            cat.name = body.name.strip()
+        if body.icon is not None:
+            cat.icon = body.icon
+        if body.color is not None:
+            cat.color = body.color
+        if body.sort_order is not None:
+            cat.sort_order = body.sort_order
+        if body.is_premium is not None:
+            cat.is_premium = body.is_premium
+        if body.active is not None:
+            cat.active = body.active
+        session.add(cat)
+        session.commit()
+        session.refresh(cat)
+        return _category_to_dict(cat)
+
+
+@app.delete("/api/admin/categories/{category_id}", status_code=204)
+def delete_category(category_id: int):
+    with Session(engine) as session:
+        cat = session.get(Category, category_id)
+        if not cat:
+            raise HTTPException(status_code=404, detail="Kategorie nicht gefunden.")
+        has_sources = session.exec(
+            select(ManagedSource).where(ManagedSource.category_id == category_id).limit(1)
+        ).first()
+        if has_sources:
+            raise HTTPException(
+                status_code=409,
+                detail="Kategorie hat noch zugeordnete Quellen. Bitte zuerst Quellen umziehen.",
+            )
+        session.delete(cat)
+        session.commit()
+
+
+# ── Prompt Settings ───────────────────────────────────────────────────────────
+
+class PromptUpdate(BaseModel):
+    value: str
+
+
+def _prompt_to_dict(p: PromptSetting) -> dict:
+    return {
+        "key": p.key,
+        "name": p.name,
+        "description": p.description,
+        "value": p.value,
+        "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+    }
+
+
+@app.get("/api/admin/prompts")
+def list_prompts():
+    with Session(engine) as session:
+        prompts = session.exec(select(PromptSetting).order_by(PromptSetting.key)).all()
+    return {"prompts": [_prompt_to_dict(p) for p in prompts]}
+
+
+@app.patch("/api/admin/prompts/{key}")
+def update_prompt(key: str, body: PromptUpdate):
+    if not body.value.strip():
+        raise HTTPException(status_code=422, detail="Prompt darf nicht leer sein.")
+    with Session(engine) as session:
+        prompt = session.get(PromptSetting, key)
+        if not prompt:
+            raise HTTPException(status_code=404, detail=f"Prompt '{key}' nicht gefunden.")
+        prompt.value = body.value
+        prompt.updated_at = datetime.utcnow()
+        session.add(prompt)
+        session.commit()
+        session.refresh(prompt)
+        return _prompt_to_dict(prompt)
 
 
