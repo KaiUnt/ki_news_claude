@@ -105,12 +105,12 @@ function StoryBlock({
     <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-3 space-y-2">
       <div className="flex items-start gap-2">
         <span className="text-amber-400 text-xs mt-0.5 shrink-0">📌</span>
-        <p className="flex-1 text-sm text-slate-200 font-medium leading-snug line-clamp-2">{title}</p>
+        <p className="flex-1 text-sm text-slate-200 font-bold leading-snug line-clamp-2">{title}</p>
         <BlockControls index={index} total={total} onMoveUp={onMoveUp} onMoveDown={onMoveDown} onRemove={onRemove} />
       </div>
       {/* Summary */}
       {story?.summary_de && (
-        <p className="text-xs text-slate-400 leading-relaxed line-clamp-3 pl-5">{story.summary_de}</p>
+        <p className="text-xs text-slate-400 leading-relaxed line-clamp-3 pl-5 italic">{story.summary_de}</p>
       )}
       {/* URL selector */}
       {isLoadingSources ? (
@@ -159,7 +159,7 @@ function HeadingBlock({
         value={block.content}
         onChange={e => onUpdateText(e.target.value)}
         placeholder="Überschrift…"
-        className="flex-1 text-sm font-semibold bg-transparent text-slate-200 placeholder:text-slate-600 focus:outline-none"
+        className="flex-1 text-base font-bold bg-transparent text-slate-100 placeholder:text-slate-600 focus:outline-none"
       />
       <BlockControls index={index} total={total} onMoveUp={onMoveUp} onMoveDown={onMoveDown} onRemove={onRemove} />
     </div>
@@ -215,6 +215,8 @@ export function TeamsPost() {
 
   const [header, setHeader] = useState('Hallo Kollegen,\n\nhier wieder die brandaktuellen News zum Thema KI:')
   const [footer, setFooter] = useState('Viel Spaß beim Lesen! 🤖')
+  const [headerOpen, setHeaderOpen] = useState(false)
+  const [footerOpen, setFooterOpen] = useState(false)
   const [copied, setCopied] = useState(false)
 
   // Load favorites on mount
@@ -467,14 +469,27 @@ export function TeamsPost() {
           </button>
         </div>
 
-        {/* Header */}
-        <textarea
-          value={header}
-          onChange={e => setHeader(e.target.value)}
-          rows={3}
-          placeholder="Einleitung…"
-          className="w-full px-3 py-2 text-sm bg-slate-800/60 border border-slate-700 rounded-lg text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 resize-none"
-        />
+        {/* Header collapsible */}
+        <div className="border border-slate-700 rounded-lg overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setHeaderOpen(o => !o)}
+            className="flex items-center gap-2 w-full px-3 py-2 text-left hover:bg-slate-800/50 transition-colors"
+          >
+            <span className={`text-[10px] text-slate-500 transition-transform duration-150 ${headerOpen ? 'rotate-90' : ''}`}>▶</span>
+            <span className="text-xs text-slate-500 flex-1 truncate">{header.split('\n')[0]}</span>
+            <span className="text-xs text-slate-600">Einleitung</span>
+          </button>
+          {headerOpen && (
+            <textarea
+              value={header}
+              onChange={e => setHeader(e.target.value)}
+              rows={3}
+              placeholder="Einleitung…"
+              className="w-full px-3 py-2 text-sm bg-slate-800/60 border-t border-slate-700 text-slate-200 placeholder:text-slate-500 focus:outline-none resize-none"
+            />
+          )}
+        </div>
 
         <InsertBlockButtons
           onInsertHeading={() => addBlock(-1, 'heading')}
@@ -531,14 +546,27 @@ export function TeamsPost() {
           </div>
         ))}
 
-        {/* Footer */}
-        <textarea
-          value={footer}
-          onChange={e => setFooter(e.target.value)}
-          rows={2}
-          placeholder="Abschluss…"
-          className="w-full px-3 py-2 text-sm bg-slate-800/60 border border-slate-700 rounded-lg text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 resize-none mt-1"
-        />
+        {/* Footer collapsible */}
+        <div className="border border-slate-700 rounded-lg overflow-hidden mt-1">
+          <button
+            type="button"
+            onClick={() => setFooterOpen(o => !o)}
+            className="flex items-center gap-2 w-full px-3 py-2 text-left hover:bg-slate-800/50 transition-colors"
+          >
+            <span className={`text-[10px] text-slate-500 transition-transform duration-150 ${footerOpen ? 'rotate-90' : ''}`}>▶</span>
+            <span className="text-xs text-slate-500 flex-1 truncate">{footer}</span>
+            <span className="text-xs text-slate-600">Abschluss</span>
+          </button>
+          {footerOpen && (
+            <textarea
+              value={footer}
+              onChange={e => setFooter(e.target.value)}
+              rows={2}
+              placeholder="Abschluss…"
+              className="w-full px-3 py-2 text-sm bg-slate-800/60 border-t border-slate-700 text-slate-200 placeholder:text-slate-500 focus:outline-none resize-none"
+            />
+          )}
+        </div>
 
         {/* Preview */}
         {blocks.length > 0 && (
