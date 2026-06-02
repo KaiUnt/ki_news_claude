@@ -69,14 +69,16 @@ function SelectableStoryCard({
   story: Story; isSelected: boolean; onToggle: () => void; onOpenDetail: (id: number) => void
 }) {
   return (
-    <div className="relative group">
+    <div className="relative group pt-2 pr-2">
+      {/* Badge top-right, outside the card border */}
       <button
         type="button"
         onClick={e => { e.stopPropagation(); onToggle() }}
-        className={`absolute top-3 left-3 z-20 w-5 h-5 rounded border-2 flex items-center justify-center transition-all
+        title={isSelected ? 'Abwählen' : 'Auswählen'}
+        className={`absolute top-0 right-0 z-20 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all shadow-md
           ${isSelected
             ? 'bg-indigo-500 border-indigo-500'
-            : 'bg-slate-950/80 border-slate-600 group-hover:border-indigo-400'}`}
+            : 'bg-slate-800 border-slate-600 opacity-0 group-hover:opacity-100 hover:border-indigo-400'}`}
       >
         {isSelected && (
           <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
@@ -529,7 +531,7 @@ export function TeamsPost() {
                     <span className="ml-auto text-xs text-slate-600">{week.items.length}</span>
                   </button>
                   {isOpen && (
-                    <div className="grid grid-cols-1 gap-3">
+                    <div className="grid grid-cols-2 gap-3">
                       {week.items.map(item => (
                         <SelectableStoryCard
                           key={item.story.id}
@@ -566,7 +568,7 @@ export function TeamsPost() {
                     <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
                   </div>
                 )}
-                <div className="grid grid-cols-1 gap-3">
+                <div className="grid grid-cols-2 gap-3">
                   {moreStories.map(story => (
                     <SelectableStoryCard
                       key={story.id}
