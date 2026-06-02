@@ -6,6 +6,7 @@ Pipeline:
   2. Deduplicate gegen bestehende DB (URL + Hash)
   3. Neue Artikel speichern (story_id=null)
   4. Claude clustert alle unklustierten Artikel → Story-Zuordnung
+  4b. Claude mergt semantische Duplikate unter den neuen Stories
   5. Claude generiert Summaries für alle neuen/unverarbeiteten Stories
   6. Claude generiert den Tages-Digest (Top-Stories + Meta-Summary)
 """
@@ -27,6 +28,7 @@ from backend.db import (
 from backend.fetcher import RSSFetcher, HackerNewsFetcher, RawArticle
 from backend.deduplicator import deduplicate, content_hash
 from backend.clusterer import cluster_articles
+from backend.story_merger import merge_recent_stories
 from backend.summarizer import Summarizer
 from backend import digest_generator
 
@@ -111,6 +113,17 @@ def main(cluster: bool = True, summarize: bool = True, digest: bool = True) -> N
     else:
         console.print("[yellow]Clustering übersprungen.[/yellow]")
 
+    # ── Phase 4b: Story-Merge ─────────────────────────────────────────────────
+    merged = 0
+    if cluster:
+        with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console) as progress:
+            task = progress.add_task("Story-Merge...", total=None)
+            merged = merge_recent_stories()
+            if merged:
+                progress.update(task, description=f"[green]{merged} Duplikate zusammengeführt[/green]")
+            else:
+                progress.update(task, description="[dim]Keine Duplikate gefunden[/dim]")
+
     # ── Phase 5: Story-Summaries ──────────────────────────────────────────────
     summarized = 0
     if summarize and cluster:
@@ -159,6 +172,7 @@ def main(cluster: bool = True, summarize: bool = True, digest: bool = True) -> N
     table.add_row("Gefetcht", str(len(raw)))
     table.add_row("Neu gespeichert", str(saved))
     table.add_row("Geclustert", str(clustered) if cluster else "–")
+    table.add_row("Duplikate gemergt", str(merged) if cluster else "–")
     table.add_row("Stories summarisiert", str(summarized) if summarize else "–")
     table.add_row("Digest", digest_status if digest else "–")
     console.print(table)
