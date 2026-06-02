@@ -383,9 +383,9 @@ export function TeamsPost() {
   }
 
   function buildTeamsHtml(): string {
-    const wrap = (inner: string) => `<p style="margin:0 0 12px 0">${inner}</p>`
-    const parts: string[] = [
-      wrap(esc(header).replace(/\n/g, '<br>')),
+    // Teams strips inline CSS margins — use <br> between sections for spacing instead
+    const sections: string[] = [
+      `<p>${esc(header).replace(/\n/g, '<br>')}</p>`,
     ]
     for (const block of blocks) {
       if (block.kind === 'story') {
@@ -397,15 +397,15 @@ export function TeamsPost() {
         let inner = `<strong>📌 ${esc(title)}</strong>`
         if (summary) inner += `<br><em>${esc(summary)}</em>`
         if (url) inner += `<br>🔗 ${esc(url)}`
-        parts.push(wrap(inner))
+        sections.push(`<p>${inner}</p>`)
       } else if (block.kind === 'heading' && block.content.trim()) {
-        parts.push(wrap(`<strong><span style="font-size:1.3em">${esc(block.content)}</span></strong>`))
+        sections.push(`<p><strong><span style="font-size:1.3em">${esc(block.content)}</span></strong></p>`)
       } else if (block.kind === 'text' && block.content.trim()) {
-        parts.push(wrap(esc(block.content).replace(/\n/g, '<br>')))
+        sections.push(`<p>${esc(block.content).replace(/\n/g, '<br>')}</p>`)
       }
     }
-    parts.push(wrap(esc(footer).replace(/\n/g, '<br>')))
-    return `<html><body>${parts.join('')}</body></html>`
+    sections.push(`<p>${esc(footer).replace(/\n/g, '<br>')}</p>`)
+    return `<html><body>${sections.join('<br>')}</body></html>`
   }
 
   function buildTeamsText(): string {
