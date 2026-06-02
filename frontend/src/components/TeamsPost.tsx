@@ -159,7 +159,7 @@ function HeadingBlock({
         value={block.content}
         onChange={e => onUpdateText(e.target.value)}
         placeholder="Überschrift…"
-        className="flex-1 text-base font-bold bg-transparent text-slate-100 placeholder:text-slate-600 focus:outline-none"
+        className="flex-1 text-xl font-bold bg-transparent text-slate-100 placeholder:text-slate-600 focus:outline-none"
       />
       <BlockControls index={index} total={total} onMoveUp={onMoveUp} onMoveDown={onMoveDown} onRemove={onRemove} />
     </div>
@@ -342,7 +342,7 @@ export function TeamsPost() {
         if (url) inner += `<br>🔗 ${esc(url)}`
         parts.push(wrap(inner))
       } else if (block.kind === 'heading' && block.content.trim()) {
-        parts.push(wrap(`<strong><span style="font-size:1.1em">${esc(block.content)}</span></strong>`))
+        parts.push(wrap(`<strong><span style="font-size:1.3em">${esc(block.content)}</span></strong>`))
       } else if (block.kind === 'text' && block.content.trim()) {
         parts.push(wrap(esc(block.content).replace(/\n/g, '<br>')))
       }
@@ -488,10 +488,10 @@ export function TeamsPost() {
       </div>
 
       {/* Right: Block editor */}
-      <div className="w-[460px] shrink-0 flex flex-col overflow-y-auto pb-4">
+      <div className="w-[460px] shrink-0 flex flex-col">
 
-        {/* Sticky header bar */}
-        <div className="sticky top-0 z-10 bg-slate-900 pb-3 flex items-center justify-between">
+        {/* Copy bar — outside scroll area so it never overlaps content */}
+        <div className="shrink-0 pb-3 flex items-center justify-between">
           <span className="text-xs text-slate-500">
             {selectedStoryIds.length === 0
               ? 'Noch keine Artikel ausgewählt'
@@ -510,6 +510,9 @@ export function TeamsPost() {
             {copied ? '✓ Kopiert!' : 'In Zwischenablage kopieren'}
           </button>
         </div>
+
+        {/* Scrollable content */}
+        <div className="flex-1 overflow-y-auto flex flex-col gap-0 pb-4">
 
         {/* Header collapsible */}
         <div className="border border-slate-700 rounded-lg overflow-hidden">
@@ -630,7 +633,7 @@ export function TeamsPost() {
                   )
                 }
                 if (block.kind === 'heading' && block.content.trim()) {
-                  return <p key={i} className="text-base font-bold text-slate-100">{block.content}</p>
+                  return <p key={i} className="text-xl font-bold text-slate-100">{block.content}</p>
                 }
                 if (block.kind === 'text' && block.content.trim()) {
                   return <p key={i} className="text-slate-300 whitespace-pre-wrap">{block.content}</p>
@@ -641,6 +644,7 @@ export function TeamsPost() {
             </div>
           </div>
         )}
+        </div>{/* end scrollable content */}
       </div>
     </div>
   )
