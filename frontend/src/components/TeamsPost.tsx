@@ -1,6 +1,15 @@
-import { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import type { FavoriteWeek, Story, Source, Filters } from '../types'
 import { fetchFavorites, fetchStories, fetchStoryDetail } from '../api'
+import {
+  DndContext, closestCenter, KeyboardSensor, PointerSensor,
+  useSensor, useSensors, type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy,
+  useSortable, arrayMove,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 
 type ContentBlock =
   | { kind: 'story'; storyId: number }
@@ -14,6 +23,37 @@ const DEFAULT_FILTERS: Filters = {
 
 function makeId() {
   return `t-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+}
+
+function blockId(block: ContentBlock): string {
+  return block.kind === 'story' ? `story-${block.storyId}` : block.id
+}
+
+function SortableBlockWrapper({ id, children }: { id: string; children: React.ReactNode }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={`flex items-start gap-1 ${isDragging ? 'opacity-40' : ''}`}
+    >
+      <button
+        type="button"
+        {...attributes}
+        {...listeners}
+        tabIndex={-1}
+        title="Verschieben"
+        className="mt-3 px-0.5 text-slate-700 hover:text-slate-400 cursor-grab active:cursor-grabbing touch-none select-none"
+      >
+        <svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor" aria-hidden="true">
+          <circle cx="3" cy="2.5" r="1.5"/><circle cx="7" cy="2.5" r="1.5"/>
+          <circle cx="3" cy="8"   r="1.5"/><circle cx="7" cy="8"   r="1.5"/>
+          <circle cx="3" cy="13.5" r="1.5"/><circle cx="7" cy="13.5" r="1.5"/>
+        </svg>
+      </button>
+      <div className="flex-1 min-w-0">{children}</div>
+    </div>
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -286,6 +326,23 @@ export function TeamsPost() {
     }
   }, [blocks, storySourcesMap])
 
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event
+    if (over && active.id !== over.id) {
+      setBlocks(prev => {
+        const ids = prev.map(blockId)
+        const oldIndex = ids.indexOf(String(active.id))
+        const newIndex = ids.indexOf(String(over.id))
+        return oldIndex !== -1 && newIndex !== -1 ? arrayMove(prev, oldIndex, newIndex) : prev
+      })
+    }
+  }
+
   const moveBlock = (index: number, direction: -1 | 1) => {
     setBlocks(prev => {
       const target = index + direction
@@ -547,49 +604,55 @@ export function TeamsPost() {
             Artikel links anhaken um sie hier hinzuzufügen
           </div>
         )}
-        {blocks.map((block, index) => (
-          <div key={block.kind === 'story' ? `story-${block.storyId}` : block.id}>
-            {block.kind === 'story' ? (
-              <StoryBlock
-                block={block}
-                index={index}
-                total={blocks.length}
-                story={storyMap.get(block.storyId)}
-                sources={storySourcesMap.get(block.storyId)}
-                isLoadingSources={loadingSources.has(block.storyId)}
-                selectedUrl={selectedUrls.get(block.storyId)}
-                onSelectUrl={url => setSelectedUrls(prev => new Map(prev).set(block.storyId, url))}
-                onMoveUp={() => moveBlock(index, -1)}
-                onMoveDown={() => moveBlock(index, 1)}
-                onRemove={() => removeBlock(index)}
-              />
-            ) : block.kind === 'heading' ? (
-              <HeadingBlock
-                block={block}
-                index={index}
-                total={blocks.length}
-                onUpdateText={content => updateContentBlock(block.id, content)}
-                onMoveUp={() => moveBlock(index, -1)}
-                onMoveDown={() => moveBlock(index, 1)}
-                onRemove={() => removeBlock(index)}
-              />
-            ) : (
-              <TextBlock
-                block={block}
-                index={index}
-                total={blocks.length}
-                onUpdateText={content => updateContentBlock(block.id, content)}
-                onMoveUp={() => moveBlock(index, -1)}
-                onMoveDown={() => moveBlock(index, 1)}
-                onRemove={() => removeBlock(index)}
-              />
-            )}
-            <InsertBlockButtons
-              onInsertHeading={() => addBlock(index, 'heading')}
-              onInsertText={() => addBlock(index, 'text')}
-            />
-          </div>
-        ))}
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={blocks.map(blockId)} strategy={verticalListSortingStrategy}>
+            {blocks.map((block, index) => (
+              <React.Fragment key={blockId(block)}>
+                <SortableBlockWrapper id={blockId(block)}>
+                  {block.kind === 'story' ? (
+                    <StoryBlock
+                      block={block}
+                      index={index}
+                      total={blocks.length}
+                      story={storyMap.get(block.storyId)}
+                      sources={storySourcesMap.get(block.storyId)}
+                      isLoadingSources={loadingSources.has(block.storyId)}
+                      selectedUrl={selectedUrls.get(block.storyId)}
+                      onSelectUrl={url => setSelectedUrls(prev => new Map(prev).set(block.storyId, url))}
+                      onMoveUp={() => moveBlock(index, -1)}
+                      onMoveDown={() => moveBlock(index, 1)}
+                      onRemove={() => removeBlock(index)}
+                    />
+                  ) : block.kind === 'heading' ? (
+                    <HeadingBlock
+                      block={block}
+                      index={index}
+                      total={blocks.length}
+                      onUpdateText={content => updateContentBlock(block.id, content)}
+                      onMoveUp={() => moveBlock(index, -1)}
+                      onMoveDown={() => moveBlock(index, 1)}
+                      onRemove={() => removeBlock(index)}
+                    />
+                  ) : (
+                    <TextBlock
+                      block={block}
+                      index={index}
+                      total={blocks.length}
+                      onUpdateText={content => updateContentBlock(block.id, content)}
+                      onMoveUp={() => moveBlock(index, -1)}
+                      onMoveDown={() => moveBlock(index, 1)}
+                      onRemove={() => removeBlock(index)}
+                    />
+                  )}
+                </SortableBlockWrapper>
+                <InsertBlockButtons
+                  onInsertHeading={() => addBlock(index, 'heading')}
+                  onInsertText={() => addBlock(index, 'text')}
+                />
+              </React.Fragment>
+            ))}
+          </SortableContext>
+        </DndContext>
 
         {/* Footer collapsible */}
         <div className="border border-slate-700 rounded-lg overflow-hidden mt-1">
