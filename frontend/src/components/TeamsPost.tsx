@@ -63,29 +63,6 @@ function SortableBlockWrapper({ id, children }: { id: string; children: React.Re
 // Sub-components
 // ---------------------------------------------------------------------------
 
-function StorySelectRow({
-  story, checked, onToggle,
-}: { story: Story; checked: boolean; onToggle: () => void }) {
-  return (
-    <label className="flex items-start gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800/70 cursor-pointer">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={onToggle}
-        className="mt-0.5 shrink-0 accent-indigo-500 w-4 h-4"
-      />
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-slate-200 leading-snug line-clamp-2">
-          {story.primary_title || story.title_de}
-        </p>
-        {story.summary_de && (
-          <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{story.summary_de}</p>
-        )}
-      </div>
-    </label>
-  )
-}
-
 function SelectableStoryCard({
   story, isSelected, onToggle, onOpenDetail,
 }: {
