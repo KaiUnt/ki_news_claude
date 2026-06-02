@@ -1,6 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import type { FavoriteWeek, Story, Source, Filters } from '../types'
 import { fetchFavorites, fetchStories, fetchStoryDetail } from '../api'
+import { FilterBar } from './FilterBar'
+import { StoryCard } from './StoryCard'
+import { StoryDetailModal } from './StoryDetailModal'
 import {
   DndContext, closestCenter, KeyboardSensor, PointerSensor,
   useSensor, useSensors, type DragEndEvent,
@@ -80,6 +83,34 @@ function StorySelectRow({
         )}
       </div>
     </label>
+  )
+}
+
+function SelectableStoryCard({
+  story, isSelected, onToggle, onOpenDetail,
+}: {
+  story: Story; isSelected: boolean; onToggle: () => void; onOpenDetail: (id: number) => void
+}) {
+  return (
+    <div className="relative group">
+      <button
+        type="button"
+        onClick={e => { e.stopPropagation(); onToggle() }}
+        className={`absolute top-3 left-3 z-20 w-5 h-5 rounded border-2 flex items-center justify-center transition-all
+          ${isSelected
+            ? 'bg-indigo-500 border-indigo-500'
+            : 'bg-slate-950/80 border-slate-600 group-hover:border-indigo-400'}`}
+      >
+        {isSelected && (
+          <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
+        )}
+      </button>
+      <div className={isSelected ? 'ring-2 ring-indigo-500 ring-offset-1 ring-offset-slate-900 rounded-xl' : ''}>
+        <StoryCard story={story} onSelect={onOpenDetail} onToggleFavorite={async () => {}} />
+      </div>
+    </div>
   )
 }
 
@@ -248,9 +279,12 @@ export function TeamsPost() {
   const [favLoading, setFavLoading] = useState(true)
   const [favError, setFavError] = useState<string | null>(null)
 
+  const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS)
+  const [detailStoryId, setDetailStoryId] = useState<number | null>(null)
+
   const [moreOpen, setMoreOpen] = useState(false)
-  const [moreSearch, setMoreSearch] = useState('')
   const [moreStories, setMoreStories] = useState<Story[]>([])
+  const [moreTotal, setMoreTotal] = useState(0)
   const [moreLoading, setMoreLoading] = useState(false)
 
   const [header, setHeader] = useState('Hallo Kollegen,\n\nhier wieder die brandaktuellen News zum Thema KI:')
@@ -276,15 +310,16 @@ export function TeamsPost() {
       .finally(() => setFavLoading(false))
   }, [])
 
-  // Load "Weitere Artikel" with debounce
+  // Load "Weitere Artikel" with debounce, using shared filters
   useEffect(() => {
     if (!moreOpen) return
     setMoreLoading(true)
     const controller = new AbortController()
     const timer = setTimeout(() => {
-      fetchStories({ ...DEFAULT_FILTERS, search: moreSearch }, 0, 30, controller.signal)
+      fetchStories(filters, 0, 40, controller.signal)
         .then(data => {
           setMoreStories(data.items.filter(s => !s.is_favorite))
+          setMoreTotal(data.total)
           setStoryMap(prev => {
             const next = new Map(prev)
             data.items.forEach(s => next.set(s.id, s))
@@ -295,7 +330,21 @@ export function TeamsPost() {
         .finally(() => setMoreLoading(false))
     }, 400)
     return () => { clearTimeout(timer); controller.abort() }
-  }, [moreOpen, moreSearch])
+  }, [moreOpen, filters.search, filters.tags.join(','), filters.sort, filters.dateFrom, filters.dateTo, filters.sources.join(',')])
+
+  const filteredWeeks = useMemo(() => {
+    const s = filters.search.toLowerCase()
+    const tags = filters.tags
+    if (!s && !tags.length) return weeks
+    return weeks.map(week => ({
+      ...week,
+      items: week.items.filter(({ story }) => {
+        if (s && ![story.title_de, story.primary_title ?? '', story.summary_de ?? ''].join(' ').toLowerCase().includes(s)) return false
+        if (tags.length && !tags.some(t => story.tags.includes(t))) return false
+        return true
+      }),
+    })).filter(week => week.items.length > 0)
+  }, [weeks, filters.search, filters.tags])
 
   const selectedStoryIds = blocks
     .filter((b): b is { kind: 'story'; storyId: number } => b.kind === 'story')
@@ -462,92 +511,102 @@ export function TeamsPost() {
   return (
     <div className="flex gap-6 h-[calc(100vh-9rem)] min-h-0">
       {/* Left: Article selector */}
-      <div className="flex-1 overflow-y-auto pr-1 space-y-6 pb-4">
+      <div className="flex-1 flex flex-col min-h-0">
+        {/* Shared FilterBar */}
+        <div className="shrink-0">
+          <FilterBar
+            filters={filters}
+            onChange={setFilters}
+            total={filteredWeeks.reduce((n, w) => n + w.items.length, 0)}
+          />
+        </div>
 
-        {/* Favoriten */}
-        <section>
-          <h2 className="text-sm font-semibold text-slate-300 mb-3 flex items-center gap-2">
-            <span className="text-amber-400">★</span> Favoriten
-          </h2>
-          {favLoading && (
-            <div className="flex justify-center py-8">
-              <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-            </div>
-          )}
-          {favError && <p className="text-xs text-red-400 px-3">{favError}</p>}
-          {!favLoading && !favError && weeks.length === 0 && (
-            <p className="text-xs text-slate-500 px-3">Noch keine Favoriten vorhanden.</p>
-          )}
-          {weeks.map(week => {
-            const isOpen = openWeeks.has(week.week_start)
-            return (
-              <div key={week.week_start} className="mb-2">
-                <button
-                  type="button"
-                  onClick={() => toggleWeek(week.week_start)}
-                  className="flex items-center gap-2 w-full text-left px-3 py-1.5 rounded-md hover:bg-slate-800/50 transition-colors"
-                >
-                  <span className={`text-[10px] text-slate-500 transition-transform duration-150 ${isOpen ? 'rotate-90' : ''}`}>▶</span>
-                  <span className="text-xs font-medium text-slate-400">{week.label}</span>
-                  <span className="ml-auto text-xs text-slate-600">{week.items.length}</span>
-                </button>
-                {isOpen && (
-                  <div className="space-y-0.5 mt-0.5">
-                    {week.items.map(item => (
-                      <StorySelectRow
-                        key={item.story.id}
-                        story={item.story}
-                        checked={selectedStoryIds.includes(item.story.id)}
-                        onToggle={() => toggleStory(item.story.id, item.story)}
-                      />
-                    ))}
+        <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-6 pb-4 mt-2">
+          {/* Favoriten */}
+          <section>
+            <h2 className="text-sm font-semibold text-slate-300 mb-3 flex items-center gap-2">
+              <span className="text-amber-400">★</span> Favoriten
+            </h2>
+            {favLoading && (
+              <div className="flex justify-center py-8">
+                <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+              </div>
+            )}
+            {favError && <p className="text-xs text-red-400 px-1">{favError}</p>}
+            {!favLoading && !favError && filteredWeeks.length === 0 && (
+              <p className="text-xs text-slate-500 px-1">
+                {weeks.length === 0 ? 'Noch keine Favoriten vorhanden.' : 'Kein Favorit passt zum Filter.'}
+              </p>
+            )}
+            {filteredWeeks.map(week => {
+              const isOpen = openWeeks.has(week.week_start)
+              return (
+                <div key={week.week_start} className="mb-4">
+                  <button
+                    type="button"
+                    onClick={() => toggleWeek(week.week_start)}
+                    className="flex items-center gap-2 w-full text-left px-1 py-1.5 rounded-md hover:bg-slate-800/50 transition-colors mb-2"
+                  >
+                    <span className={`text-[10px] text-slate-500 transition-transform duration-150 ${isOpen ? 'rotate-90' : ''}`}>▶</span>
+                    <span className="text-xs font-medium text-slate-400">{week.label}</span>
+                    <span className="ml-auto text-xs text-slate-600">{week.items.length}</span>
+                  </button>
+                  {isOpen && (
+                    <div className="grid grid-cols-1 gap-3">
+                      {week.items.map(item => (
+                        <SelectableStoryCard
+                          key={item.story.id}
+                          story={item.story}
+                          isSelected={selectedStoryIds.includes(item.story.id)}
+                          onToggle={() => toggleStory(item.story.id, item.story)}
+                          onOpenDetail={setDetailStoryId}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </section>
+
+          {/* Weitere Artikel */}
+          <section>
+            <button
+              type="button"
+              onClick={() => setMoreOpen(o => !o)}
+              className="flex items-center gap-2 text-sm text-slate-400 hover:text-slate-200 transition-colors px-1 mb-2"
+            >
+              <span className={`text-xs transition-transform duration-200 ${moreOpen ? 'rotate-90' : ''}`}>▶</span>
+              Weitere Artikel
+              {moreOpen && moreTotal > 0 && (
+                <span className="text-xs text-slate-600 ml-1">{moreTotal}</span>
+              )}
+            </button>
+            {moreOpen && (
+              <>
+                {moreLoading && (
+                  <div className="flex justify-center py-4">
+                    <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
                   </div>
                 )}
-              </div>
-            )
-          })}
-        </section>
-
-        {/* Weitere Artikel */}
-        <section>
-          <button
-            type="button"
-            onClick={() => setMoreOpen(o => !o)}
-            className="flex items-center gap-2 text-sm text-slate-400 hover:text-slate-200 transition-colors px-1"
-          >
-            <span className={`text-xs transition-transform duration-200 ${moreOpen ? 'rotate-90' : ''}`}>▶</span>
-            Weitere Artikel
-          </button>
-          {moreOpen && (
-            <div className="mt-3 space-y-2">
-              <input
-                type="text"
-                placeholder="Suchen…"
-                value={moreSearch}
-                onChange={e => setMoreSearch(e.target.value)}
-                className="w-full px-3 py-1.5 text-sm bg-slate-800 border border-slate-700 rounded-lg text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
-              />
-              {moreLoading && (
-                <div className="flex justify-center py-4">
-                  <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                <div className="grid grid-cols-1 gap-3">
+                  {moreStories.map(story => (
+                    <SelectableStoryCard
+                      key={story.id}
+                      story={story}
+                      isSelected={selectedStoryIds.includes(story.id)}
+                      onToggle={() => toggleStory(story.id, story)}
+                      onOpenDetail={setDetailStoryId}
+                    />
+                  ))}
                 </div>
-              )}
-              <div className="space-y-0.5">
-                {moreStories.map(story => (
-                  <StorySelectRow
-                    key={story.id}
-                    story={story}
-                    checked={selectedStoryIds.includes(story.id)}
-                    onToggle={() => toggleStory(story.id, story)}
-                  />
-                ))}
                 {!moreLoading && moreStories.length === 0 && (
-                  <p className="text-xs text-slate-600 px-3 py-2">Keine weiteren Artikel gefunden.</p>
+                  <p className="text-xs text-slate-600 px-1 py-2">Keine weiteren Artikel gefunden.</p>
                 )}
-              </div>
-            </div>
-          )}
-        </section>
+              </>
+            )}
+          </section>
+        </div>
       </div>
 
       {/* Right: Block editor */}
@@ -715,6 +774,10 @@ export function TeamsPost() {
         )}
         </div>{/* end scrollable content */}
       </div>
+
+      {detailStoryId !== null && (
+        <StoryDetailModal storyId={detailStoryId} onClose={() => setDetailStoryId(null)} />
+      )}
     </div>
   )
 }
