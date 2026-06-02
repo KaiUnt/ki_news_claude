@@ -500,6 +500,7 @@ def _digest_summary(d: DailyDigest) -> dict:
         "meta_summary_de": d.meta_summary_de,
         "model_id": d.model_id,
         "top_story_count": len(d.top_stories),
+        "category_id": d.category_id,
     }
 
 
@@ -544,11 +545,17 @@ def _hydrate_digest(session: Session, digest: DailyDigest) -> dict:
 
 
 @app.get("/api/digest/latest")
-def get_latest_digest():
+def get_latest_digest(category_slug: Optional[str] = Query(None)):
     with Session(engine) as session:
-        digest = session.exec(
-            select(DailyDigest).order_by(DailyDigest.generated_at.desc()).limit(1)
-        ).first()
+        q = select(DailyDigest).order_by(DailyDigest.generated_at.desc()).limit(1)
+        if category_slug:
+            cat = session.exec(select(Category).where(Category.slug == category_slug)).first()
+            if not cat:
+                raise HTTPException(status_code=404, detail=f"Kategorie '{category_slug}' nicht gefunden.")
+            q = q.where(DailyDigest.category_id == cat.id)
+        else:
+            q = q.where(DailyDigest.category_id.is_(None))
+        digest = session.exec(q).first()
         if not digest:
             raise HTTPException(status_code=404, detail="No digest exists yet")
         return _hydrate_digest(session, digest)
@@ -583,8 +590,15 @@ def list_digests(
 
 
 @app.post("/api/digest/regenerate")
-def regenerate_digest():
-    digest = digest_generator.generate(reuse_last_window=True)
+def regenerate_digest(category_slug: Optional[str] = Query(None)):
+    category_id: Optional[int] = None
+    if category_slug:
+        with Session(engine) as session:
+            cat = session.exec(select(Category).where(Category.slug == category_slug)).first()
+            if not cat:
+                raise HTTPException(status_code=404, detail=f"Kategorie '{category_slug}' nicht gefunden.")
+            category_id = cat.id
+    digest = digest_generator.generate(reuse_last_window=True, category_id=category_id)
     if digest is None:
         raise HTTPException(
             status_code=400,
@@ -717,15 +731,28 @@ def _run_fetch(cluster: bool, summarize: bool, digest: bool) -> dict:
         summarizer = Summarizer()
         summarized = summarizer.summarize_pending_stories()
 
-    # Digest
+    # Digest — global first, then per active category
     digest_id: Optional[int] = None
+    category_digest_ids: list[int] = []
     if digest and cluster and summarize:
         try:
             generated = digest_generator.generate()
             if generated is not None:
                 digest_id = generated.id
         except Exception as exc:
-            logger.error("[fetch] Digest generation failed: %s", exc)
+            logger.error("[fetch] Global digest generation failed: %s", exc)
+
+        with Session(engine) as session:
+            active_cats = list(session.exec(
+                select(Category).where(Category.active == True)
+            ).all())
+        for cat in active_cats:
+            try:
+                cat_digest = digest_generator.generate(category_id=cat.id)
+                if cat_digest is not None:
+                    category_digest_ids.append(cat_digest.id)
+            except Exception as exc:
+                logger.error("[fetch] Category digest '%s' failed: %s", cat.slug, exc)
 
     return {
         "fetched": len(raw),
@@ -734,6 +761,7 @@ def _run_fetch(cluster: bool, summarize: bool, digest: bool) -> dict:
         "stories_merged": merged,
         "stories_summarized": summarized,
         "digest_id": digest_id,
+        "category_digest_ids": category_digest_ids,
     }
 
 
@@ -1001,6 +1029,7 @@ class CategoryUpdate(BaseModel):
     sort_order: Optional[int] = None
     is_premium: Optional[bool] = None
     active: Optional[bool] = None
+    digest_prompt: Optional[str] = None  # empty string → set to None (use global)
 
 
 def _category_to_dict(c: Category) -> dict:
@@ -1013,6 +1042,7 @@ def _category_to_dict(c: Category) -> dict:
         "sort_order": c.sort_order,
         "is_premium": c.is_premium,
         "active": c.active,
+        "digest_prompt": c.digest_prompt,
         "created_at": c.created_at.isoformat() if c.created_at else None,
     }
 
@@ -1067,6 +1097,9 @@ def update_category(category_id: int, body: CategoryUpdate):
             cat.is_premium = body.is_premium
         if body.active is not None:
             cat.active = body.active
+        if body.digest_prompt is not None:
+            # Empty string → reset to global prompt (store None)
+            cat.digest_prompt = body.digest_prompt.strip() or None
         session.add(cat)
         session.commit()
         session.refresh(cat)

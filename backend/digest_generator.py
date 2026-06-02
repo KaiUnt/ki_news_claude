@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 from sqlmodel import Session, select, func, or_
 
 from .config import settings, split_tags
-from .db import Article, Story, DailyDigest, UserProfile, engine, get_prompt
+from .db import Article, Story, DailyDigest, UserProfile, Category, ManagedSource, engine, get_prompt
 from .source_catalog import PAPER_SOURCES, story_signals_for_source_names
 from .claude_retry import call_with_retry
 
@@ -46,29 +46,27 @@ Antworte ausschließlich als gültiges JSON, kein Markdown:
 }"""
 
 
-def generate(reuse_last_window: bool = False) -> Optional[DailyDigest]:
-    """Generate a new DailyDigest. Persists and returns it.
+def generate(
+    reuse_last_window: bool = False,
+    category_id: Optional[int] = None,
+) -> Optional[DailyDigest]:
+    """Generate a DailyDigest — global (category_id=None) or per-category.
 
-    reuse_last_window=False: window starts at MAX(DailyDigest.generated_at), or
-                              now-24h if no digest exists yet. This is the
-                              daily-pipeline mode (only "new since last digest").
-    reuse_last_window=True:  window starts at last digest's window_start, so the
-                              same story pool is re-curated. Used by the manual
-                              regenerate endpoint after a priority_prompt edit.
+    reuse_last_window=False: window starts at last digest's generated_at for
+                              this digest type (global or same category).
+    reuse_last_window=True:  re-curates the same story pool as the last digest
+                              of this type. Used on manual regenerate.
 
-    Returns None if the resulting window has no processed stories.
+    Returns None if no processed stories in the window.
     """
     with Session(engine) as session:
         profile = session.get(UserProfile, 1)
         if profile is None:
             raise RuntimeError("Default profile (id=1) not initialized")
 
-        window_start = _compute_window_start(session, reuse_last_window)
+        window_start = _compute_window_start(session, reuse_last_window, category_id)
         window_end = datetime.utcnow()
 
-        # Stories qualify for this digest only if they have at least one article
-        # with a recent publication date — prevents backfill mirrors from
-        # re-floating years-old reports into today's window.
         recent_story_ids = list(session.exec(
             select(Article.story_id)
             .where(Article.story_id.is_not(None))
@@ -88,11 +86,6 @@ def generate(reuse_last_window: bool = False) -> Optional[DailyDigest]:
         if not recent_story_ids:
             return None
 
-        # Paper-only stories live in the dedicated Paper-Stream lane in the
-        # dashboard and must not surface as Top-Stories in the digest. A story
-        # qualifies as "non-paper" if it has at least one article from a
-        # non-paper source — mixed clusters (arXiv + TechCrunch reporting)
-        # stay eligible.
         non_paper_story_ids = (
             select(Article.story_id)
             .where(Article.story_id.is_not(None))
@@ -100,8 +93,6 @@ def generate(reuse_last_window: bool = False) -> Optional[DailyDigest]:
             .distinct()
         )
 
-        # Pure newsletter stories are excluded from the digest — they live in
-        # their own Newsletter view. Mixed clusters stay eligible.
         non_newsletter_story_ids = list(session.exec(
             select(Article.story_id)
             .where(Article.story_id.is_not(None))
@@ -115,28 +106,44 @@ def generate(reuse_last_window: bool = False) -> Optional[DailyDigest]:
             .where(Story.id.in_(non_newsletter_story_ids))
             .where(Story.is_processed == True)
             .where(Story.id.in_(non_paper_story_ids))
-            # Exclude historic catch-all stories (often 20+ unrelated articles
-            # piled into a single "Sonstiges" bucket by older cluster runs).
             .where(func.lower(Story.title_de) != "sonstiges")
         )
 
-        # Each story may appear in at most one digest. On regenerate, also include
-        # the exact stories that were in the last digest (regardless of when their
-        # first_digest_id was set), so the same pool gets re-curated.
-        if reuse_last_window:
-            last_digest = session.exec(
-                select(DailyDigest).order_by(DailyDigest.generated_at.desc()).limit(1)
-            ).first()
-            last_top_ids = {
-                t.get("story_id")
-                for t in (last_digest.top_stories if last_digest else [])
-                if isinstance(t.get("story_id"), int)
-            }
-            story_query = story_query.where(
-                or_(Story.first_digest_id.is_(None), Story.id.in_(last_top_ids))
-            ) if last_top_ids else story_query.where(Story.first_digest_id.is_(None))
+        # Per-category: restrict to stories from sources belonging to this category
+        if category_id is not None:
+            cat_source_names = list(session.exec(
+                select(ManagedSource.name).where(ManagedSource.category_id == category_id)
+            ).all())
+            if not cat_source_names:
+                return None
+            cat_story_subq = (
+                select(Article.story_id)
+                .where(Article.story_id.is_not(None))
+                .where(Article.source_name.in_(cat_source_names))
+                .distinct()
+            )
+            story_query = story_query.where(Story.id.in_(cat_story_subq))
+            # Category digests don't use first_digest_id guard — same story can
+            # appear in both global and category digest.
         else:
-            story_query = story_query.where(Story.first_digest_id.is_(None))
+            # Global digest: only stories not yet in any digest
+            if reuse_last_window:
+                last_digest = session.exec(
+                    select(DailyDigest)
+                    .where(DailyDigest.category_id.is_(None))
+                    .order_by(DailyDigest.generated_at.desc())
+                    .limit(1)
+                ).first()
+                last_top_ids = {
+                    t.get("story_id")
+                    for t in (last_digest.top_stories if last_digest else [])
+                    if isinstance(t.get("story_id"), int)
+                }
+                story_query = story_query.where(
+                    or_(Story.first_digest_id.is_(None), Story.id.in_(last_top_ids))
+                ) if last_top_ids else story_query.where(Story.first_digest_id.is_(None))
+            else:
+                story_query = story_query.where(Story.first_digest_id.is_(None))
 
         stories = list(session.exec(story_query).all())
         story_ids = [story.id for story in stories if story.id is not None]
@@ -151,9 +158,19 @@ def generate(reuse_last_window: bool = False) -> Optional[DailyDigest]:
                     continue
                 source_names_by_story.setdefault(story_id, []).append(source_name)
 
+        # Prompt: category-specific if set, else global digest_curation
+        if category_id is not None:
+            category = session.get(Category, category_id)
+            system_prompt = (
+                category.digest_prompt
+                if category and category.digest_prompt
+                else get_prompt(session, "digest_curation", _SYSTEM_PROMPT)
+            )
+        else:
+            system_prompt = get_prompt(session, "digest_curation", _SYSTEM_PROMPT)
+
         priority_prompt = profile.priority_prompt or ""
         profile_id = profile.id
-        system_prompt = get_prompt(session, "digest_curation", _SYSTEM_PROMPT)
 
     if not stories:
         return None
@@ -183,10 +200,6 @@ def generate(reuse_last_window: bool = False) -> Optional[DailyDigest]:
 
     call_result = _call_safe(user_msg, system_prompt)
     if call_result is None:
-        # Claude failed — skip persistence so stories stay eligible for the next
-        # run instead of being "burnt" by an empty fallback digest. window_start
-        # for the next pipeline run stays at the previous successful digest's
-        # generated_at, so the same pool is reconsidered.
         return None
     result, raw_response = call_result
 
@@ -198,40 +211,52 @@ def generate(reuse_last_window: bool = False) -> Optional[DailyDigest]:
         meta_summary_de=result["meta_summary_de"],
         model_id=settings.model_id,
         raw_response=raw_response,
+        category_id=category_id,
     )
     digest.top_stories = result["top_stories"]
 
-    # expire_on_commit=False keeps `digest` attributes loaded after the second
-    # commit below — otherwise marking stories with first_digest_id triggers an
-    # implicit expire on `digest` and the caller hits DetachedInstanceError.
     with Session(engine, expire_on_commit=False) as session:
         session.add(digest)
         session.commit()
         session.refresh(digest)
 
-        # Mark each top story with its first digest appearance (Fix 4: one-shot)
-        for entry in result["top_stories"]:
-            sid = entry.get("story_id")
-            if not isinstance(sid, int):
-                continue
-            story = session.get(Story, sid)
-            if story and story.first_digest_id is None:
-                story.first_digest_id = digest.id
-                session.add(story)
-        session.commit()
+        # Only global digests mark first_digest_id on stories
+        if category_id is None:
+            for entry in result["top_stories"]:
+                sid = entry.get("story_id")
+                if not isinstance(sid, int):
+                    continue
+                story = session.get(Story, sid)
+                if story and story.first_digest_id is None:
+                    story.first_digest_id = digest.id
+                    session.add(story)
+            session.commit()
 
     return digest
 
 
-def _compute_window_start(session: Session, reuse_last_window: bool) -> datetime:
+def _compute_window_start(
+    session: Session,
+    reuse_last_window: bool,
+    category_id: Optional[int] = None,
+) -> datetime:
+    q = select(DailyDigest)
+    if category_id is None:
+        q = q.where(DailyDigest.category_id.is_(None))
+    else:
+        q = q.where(DailyDigest.category_id == category_id)
+
     if reuse_last_window:
-        last = session.exec(
-            select(DailyDigest).order_by(DailyDigest.generated_at.desc()).limit(1)
-        ).first()
+        last = session.exec(q.order_by(DailyDigest.generated_at.desc()).limit(1)).first()
         if last:
             return last.window_start
     else:
-        last_at = session.exec(select(func.max(DailyDigest.generated_at))).first()
+        max_q = select(func.max(DailyDigest.generated_at))
+        if category_id is None:
+            max_q = max_q.where(DailyDigest.category_id.is_(None))
+        else:
+            max_q = max_q.where(DailyDigest.category_id == category_id)
+        last_at = session.exec(max_q).first()
         if last_at:
             return last_at
     return datetime.utcnow() - timedelta(hours=24)

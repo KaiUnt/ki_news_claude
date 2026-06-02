@@ -112,6 +112,7 @@ export interface DigestSummary {
   meta_summary_de: string
   model_id: string
   top_story_count: number
+  category_id: number | null
 }
 
 export interface UserProfile {
@@ -159,6 +160,7 @@ export interface Category {
   sort_order: number
   is_premium: boolean
   active: boolean
+  digest_prompt: string | null
   created_at: string
 }
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import type { DigestLatest, Story, Category } from '../types'
-import { fetchCategories, fetchStoriesByCategory } from '../api'
+import type { DigestLatest, DigestTopStory, Story, Category } from '../types'
+import { fetchCategories, fetchCategoryDigest } from '../api'
 import { TopStoryCard } from './TopStoryCard'
 import { StoryCard } from './StoryCard'
 
@@ -31,31 +31,31 @@ function CategoryStreamSection({
   onSelectStory: (id: number) => void
   onToggleFavorite: (story: Story, next: boolean) => Promise<void>
 }) {
-  const [stories, setStories] = useState<Story[]>([])
+  const [digest, setDigest] = useState<DigestLatest | null | undefined>(undefined)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     const ac = new AbortController()
     setLoading(true)
-    fetchStoriesByCategory(category.slug, 8, ac.signal)
-      .then(data => {
-        if (!ac.signal.aborted) setStories(data.items)
-      })
-      .catch(() => {})
+    fetchCategoryDigest(category.slug, ac.signal)
+      .then(data => { if (!ac.signal.aborted) setDigest(data) })
+      .catch(() => { if (!ac.signal.aborted) setDigest(null) })
       .finally(() => { if (!ac.signal.aborted) setLoading(false) })
     return () => ac.abort()
   }, [category.slug])
 
-  const visible = stories.filter(s => !topStoryIds.has(s.id))
-  if (!loading && visible.length === 0) return null
+  const visibleEntries: DigestTopStory[] = (digest?.top_stories ?? [])
+    .filter(e => !topStoryIds.has(e.story.id))
+
+  if (!loading && !digest) return null
+  if (!loading && digest && visibleEntries.length === 0) return null
+
+  const accentColor = category.color ?? '#6366f1'
 
   return (
     <section>
       <div className="flex items-center gap-2 mb-4">
-        <span
-          className="w-2 h-2 rounded-full"
-          style={{ background: category.color ?? '#6366f1' }}
-        />
+        <span className="w-2 h-2 rounded-full" style={{ background: accentColor }} />
         <h2 className="text-sm uppercase tracking-wider text-slate-500 font-medium m-0">
           {category.icon && <span className="mr-1.5">{category.icon}</span>}
           {category.name}
@@ -65,24 +65,37 @@ function CategoryStreamSection({
             </span>
           )}
         </h2>
+        {digest && (
+          <span className="text-xs text-slate-600 ml-1">
+            · {new Date(digest.generated_at).toLocaleString('de-AT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+          </span>
+        )}
       </div>
 
       {loading ? (
         <div className="flex justify-center py-6">
-          <div className="w-5 h-5 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: category.color ?? '#6366f1', borderTopColor: 'transparent' }} />
+          <div className="w-5 h-5 border-2 border-t-transparent rounded-full animate-spin"
+            style={{ borderColor: accentColor, borderTopColor: 'transparent' }} />
         </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-          {visible.map(story => (
-            <StoryCard
-              key={story.id}
-              story={story}
-              onSelect={onSelectStory}
-              onToggleFavorite={onToggleFavorite}
-            />
-          ))}
-        </div>
-      )}
+      ) : digest ? (
+        <>
+          {digest.meta_summary_de && (
+            <div className="text-slate-300 text-sm leading-relaxed whitespace-pre-line mb-5 pl-3 border-l-2" style={{ borderColor: accentColor }}>
+              {digest.meta_summary_de}
+            </div>
+          )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {visibleEntries.map(entry => (
+              <TopStoryCard
+                key={entry.story.id}
+                entry={entry}
+                onSelect={onSelectStory}
+                onToggleFavorite={onToggleFavorite}
+              />
+            ))}
+          </div>
+        </>
+      ) : null}
     </section>
   )
 }

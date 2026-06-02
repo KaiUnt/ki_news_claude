@@ -75,6 +75,10 @@ function CategorySection({
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [togglingId, setTogglingId] = useState<number | null>(null)
+  const [expandedPromptId, setExpandedPromptId] = useState<number | null>(null)
+  const [promptValues, setPromptValues] = useState<Record<number, string>>({})
+  const [savingPromptId, setSavingPromptId] = useState<number | null>(null)
+  const [savedPromptId, setSavedPromptId] = useState<number | null>(null)
 
   async function handleToggleActive(cat: Category) {
     setTogglingId(cat.id)
@@ -86,6 +90,30 @@ function CategorySection({
       setCategories(prev => prev.map(c => c.id === cat.id ? cat : c))
     } finally {
       setTogglingId(null)
+    }
+  }
+
+  function handleExpandPrompt(cat: Category) {
+    if (expandedPromptId === cat.id) {
+      setExpandedPromptId(null)
+      return
+    }
+    setExpandedPromptId(cat.id)
+    if (!(cat.id in promptValues)) {
+      setPromptValues(prev => ({ ...prev, [cat.id]: cat.digest_prompt ?? '' }))
+    }
+  }
+
+  async function handleSavePrompt(cat: Category) {
+    const value = promptValues[cat.id] ?? ''
+    setSavingPromptId(cat.id)
+    try {
+      const updated = await updateCategory(cat.id, { digest_prompt: value })
+      setCategories(prev => prev.map(c => c.id === cat.id ? updated : c))
+      setSavedPromptId(cat.id)
+      setTimeout(() => setSavedPromptId(null), 2000)
+    } catch { /* ignore */ } finally {
+      setSavingPromptId(null)
     }
   }
 
@@ -136,24 +164,74 @@ function CategorySection({
       {!loading && !error && (
         <ul className="flex flex-col gap-2 m-0 p-0 list-none mb-4">
           {categories.map(cat => (
-            <li
-              key={cat.id}
-              className="flex items-center gap-3 py-2 px-3 rounded-lg bg-slate-800/50 border border-slate-700/50"
-            >
-              <CategoryDot color={cat.color} />
-              <span className="text-base leading-none">{cat.icon ?? ''}</span>
-              <span className="text-sm text-slate-100 font-medium flex-1">{cat.name}</span>
-              <span className="text-xs text-slate-500 font-mono">{cat.slug}</span>
-              {cat.is_premium && (
-                <span className="text-xs px-1.5 py-0.5 rounded border bg-yellow-500/10 text-yellow-400 border-yellow-500/30">
-                  Premium
-                </span>
+            <li key={cat.id} className="rounded-lg bg-slate-800/50 border border-slate-700/50 overflow-hidden">
+              {/* Main row */}
+              <div className="flex items-center gap-3 py-2 px-3">
+                <CategoryDot color={cat.color} />
+                <span className="text-base leading-none">{cat.icon ?? ''}</span>
+                <span className="text-sm text-slate-100 font-medium flex-1">{cat.name}</span>
+                <span className="text-xs text-slate-500 font-mono">{cat.slug}</span>
+                {cat.is_premium && (
+                  <span className="text-xs px-1.5 py-0.5 rounded border bg-yellow-500/10 text-yellow-400 border-yellow-500/30">
+                    Premium
+                  </span>
+                )}
+                {cat.digest_prompt && (
+                  <span className="text-xs text-indigo-400" title="Hat eigenen Digest-Prompt">✦</span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => handleExpandPrompt(cat)}
+                  className="text-xs text-slate-500 hover:text-indigo-400 transition-colors px-1.5 py-0.5 rounded"
+                  title="Digest-Prompt bearbeiten"
+                >
+                  Prompt {expandedPromptId === cat.id ? '▲' : '▼'}
+                </button>
+                <Toggle
+                  checked={cat.active}
+                  onChange={() => handleToggleActive(cat)}
+                  disabled={togglingId === cat.id}
+                />
+              </div>
+
+              {/* Expandable prompt editor */}
+              {expandedPromptId === cat.id && (
+                <div className="border-t border-slate-700/50 px-3 pb-3 pt-3 flex flex-col gap-2 bg-slate-900/30">
+                  <p className="text-xs text-slate-500 m-0">
+                    Eigener Digest-Prompt für <strong className="text-slate-300">{cat.name}</strong>.
+                    Leer lassen um den globalen Digest-Prompt zu verwenden.
+                  </p>
+                  <textarea
+                    value={promptValues[cat.id] ?? cat.digest_prompt ?? ''}
+                    onChange={e => setPromptValues(prev => ({ ...prev, [cat.id]: e.target.value }))}
+                    rows={8}
+                    placeholder="Leer = globaler Digest-Prompt wird verwendet"
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 font-mono focus:outline-none focus:border-indigo-500/60 resize-y leading-relaxed placeholder-slate-600"
+                  />
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => handleSavePrompt(cat)}
+                      disabled={savingPromptId === cat.id}
+                      className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-xs text-white font-medium transition-colors flex items-center gap-1.5"
+                    >
+                      {savingPromptId === cat.id && <span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
+                      {savingPromptId === cat.id ? 'Speichern…' : savedPromptId === cat.id ? '✓ Gespeichert' : 'Speichern'}
+                    </button>
+                    {(promptValues[cat.id] ?? '') && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPromptValues(prev => ({ ...prev, [cat.id]: '' }))
+                        }}
+                        className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+                      >
+                        Zurücksetzen (globalen Prompt nutzen)
+                      </button>
+                    )}
+                  </div>
+                </div>
               )}
-              <Toggle
-                checked={cat.active}
-                onChange={() => handleToggleActive(cat)}
-                disabled={togglingId === cat.id}
-              />
             </li>
           ))}
           {categories.length === 0 && (

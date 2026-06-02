@@ -245,7 +245,7 @@ export async function createCategory(
 
 export async function updateCategory(
   id: number,
-  patch: Partial<Pick<Category, 'name' | 'icon' | 'color' | 'sort_order' | 'is_premium' | 'active'>>
+  patch: Partial<Pick<Category, 'name' | 'icon' | 'color' | 'sort_order' | 'is_premium' | 'active' | 'digest_prompt'>>
 ): Promise<Category> {
   const res = await fetch(`${BASE}/admin/categories/${id}`, {
     method: 'PATCH',
@@ -278,6 +278,16 @@ export async function fetchStoriesByCategory(
     offset: '0',
   })
   const res = await fetch(`${BASE}/stories?${params}`, { signal })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
+export async function fetchCategoryDigest(
+  categorySlug: string,
+  signal?: AbortSignal,
+): Promise<DigestLatest | null> {
+  const res = await fetch(`${BASE}/digest/latest?category_slug=${encodeURIComponent(categorySlug)}`, { signal })
+  if (res.status === 404) return null
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.json()
 }

@@ -20,6 +20,7 @@ class Category(SQLModel, table=True):
     is_premium: bool = Field(default=False)
     active: bool = Field(default=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    digest_prompt: Optional[str] = Field(default=None)  # NULL = uses global digest_curation prompt
 
 
 class PromptSetting(SQLModel, table=True):
@@ -104,6 +105,8 @@ class DailyDigest(SQLModel, table=True):
     top_story_ids_json: str  # JSON: [{"story_id": int, "rank": int, "why": str}, ...]
     model_id: str
     raw_response: Optional[str] = None
+    category_id: Optional[int] = Field(default=None, foreign_key="category.id", index=True)
+    # NULL = global digest; non-NULL = per-category digest
 
     @property
     def top_stories(self) -> list[dict]:
@@ -212,6 +215,16 @@ def _migrate_schema() -> None:
             conn.commit()
         if "story_kind" not in ms_cols:
             conn.execute(text("ALTER TABLE managedsource ADD COLUMN story_kind TEXT DEFAULT 'general'"))
+            conn.commit()
+
+        cat_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(category)"))}
+        if "digest_prompt" not in cat_cols:
+            conn.execute(text("ALTER TABLE category ADD COLUMN digest_prompt TEXT"))
+            conn.commit()
+
+        dd_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(dailydigest)"))}
+        if "category_id" not in dd_cols:
+            conn.execute(text("ALTER TABLE dailydigest ADD COLUMN category_id INTEGER REFERENCES category(id)"))
             conn.commit()
 
 
