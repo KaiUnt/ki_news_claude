@@ -52,15 +52,21 @@ def _story_to_dict(
     sources: list[Article] | None = None,
     include_sources: bool = False,
     primary_title: str | None = None,
+    primary_url: str | None = None,
     is_favorite: bool = False,
 ) -> dict:
-    if primary_title is None and sources:
-        primary_title = max(sources, key=lambda a: len(a.raw_content or "")).title
+    if (primary_title is None or primary_url is None) and sources:
+        best = max(sources, key=lambda a: len(a.raw_content or ""))
+        if primary_title is None:
+            primary_title = best.title
+        if primary_url is None:
+            primary_url = best.url
     signals = _story_signals(sources or [])
     d = {
         "id": s.id,
         "title_de": s.title_de,
         "primary_title": primary_title,
+        "primary_url": primary_url,
         "summary_de": s.summary_de,
         "tags": normalize_tags(s.tags),
         "source_count": s.source_count,
@@ -85,8 +91,8 @@ def _favorite_story_ids(session: Session, story_ids: list[int], user_profile_id:
     ).all())
 
 
-def _batch_primary_titles(session: Session, story_ids: list[int]) -> dict[int, str]:
-    """Return {story_id: title_of_longest_raw_content_article} for the given stories.
+def _batch_primary_info(session: Session, story_ids: list[int]) -> dict[int, dict]:
+    """Return {story_id: {"title": str, "url": str}} for the best article per story.
 
     Mirrors Summarizer._best_article_for_story logic so the displayed headline
     matches the article that produced the German summary.
@@ -94,13 +100,16 @@ def _batch_primary_titles(session: Session, story_ids: list[int]) -> dict[int, s
     if not story_ids:
         return {}
     rows = session.exec(
-        select(Article.story_id, Article.title, Article.raw_content)
+        select(Article.story_id, Article.title, Article.url, Article.raw_content)
         .where(Article.story_id.in_(story_ids))
     ).all()
-    by_story: dict[int, list[tuple[str, int]]] = {}
-    for sid, title, raw in rows:
-        by_story.setdefault(sid, []).append((title, len(raw or "")))
-    return {sid: max(items, key=lambda x: x[1])[0] for sid, items in by_story.items()}
+    by_story: dict[int, list[tuple[str, str, int]]] = {}
+    for sid, title, url, raw in rows:
+        by_story.setdefault(sid, []).append((title, url, len(raw or "")))
+    return {
+        sid: {"title": max(items, key=lambda x: x[2])[0], "url": max(items, key=lambda x: x[2])[1]}
+        for sid, items in by_story.items()
+    }
 
 
 def _batch_story_articles(session: Session, story_ids: list[int]) -> dict[int, list[Article]]:
@@ -281,7 +290,7 @@ def list_stories(
         page = list(session.exec(data_stmt).all())
 
         page_ids = [s.id for s in page if s.id is not None]
-        primaries = _batch_primary_titles(session, page_ids)
+        primary_info = _batch_primary_info(session, page_ids)
         favorite_ids = _favorite_story_ids(session, page_ids)
         page_source_map = _batch_story_articles(session, page_ids)
 
@@ -293,7 +302,8 @@ def list_stories(
             _story_to_dict(
                 s,
                 sources=page_source_map.get(s.id, []),
-                primary_title=primaries.get(s.id),
+                primary_title=primary_info.get(s.id, {}).get("title"),
+                primary_url=primary_info.get(s.id, {}).get("url"),
                 is_favorite=s.id in favorite_ids,
             )
             for s in page
@@ -330,7 +340,7 @@ def list_favorites():
             .order_by(FavoriteStory.created_at.desc())
         ).all()
         story_ids = [story.id for _, story in rows if story.id is not None]
-        primaries = _batch_primary_titles(session, story_ids)
+        primary_info = _batch_primary_info(session, story_ids)
         source_map = _batch_story_articles(session, story_ids)
 
     by_week: dict[str, dict] = {}
@@ -350,7 +360,8 @@ def list_favorites():
                 "story": _story_to_dict(
                     story,
                     sources=source_map.get(story.id, []),
-                    primary_title=primaries.get(story.id),
+                    primary_title=primary_info.get(story.id, {}).get("title"),
+                    primary_url=primary_info.get(story.id, {}).get("url"),
                     is_favorite=True,
                 ),
             })
@@ -381,12 +392,13 @@ def add_favorite(story_id: int):
             else:
                 session.refresh(favorite)
 
-        primary = _batch_primary_titles(session, [story_id]).get(story_id)
+        info = _batch_primary_info(session, [story_id]).get(story_id, {})
         source_map = _batch_story_articles(session, [story_id])
         return _story_to_dict(
             story,
             sources=source_map.get(story_id, []),
-            primary_title=primary,
+            primary_title=info.get("title"),
+            primary_url=info.get("url"),
             is_favorite=True,
         )
 
@@ -485,10 +497,11 @@ def _hydrate_digest(session: Session, digest: DailyDigest) -> dict:
     if story_ids:
         stories = session.exec(select(Story).where(Story.id.in_(story_ids))).all()
         story_by_id = {s.id: s for s in stories}
-        primaries = _batch_primary_titles(session, story_ids)
+        primary_info = _batch_primary_info(session, story_ids)
         favorite_ids = _favorite_story_ids(session, story_ids)
         source_map = _batch_story_articles(session, story_ids)
     else:
+        primary_info = {}
         source_map = {}
 
     top_with_data = []
@@ -503,7 +516,8 @@ def _hydrate_digest(session: Session, digest: DailyDigest) -> dict:
             "story": _story_to_dict(
                 story,
                 sources=source_map.get(sid, []),
-                primary_title=primaries.get(sid),
+                primary_title=primary_info.get(sid, {}).get("title"),
+                primary_url=primary_info.get(sid, {}).get("url"),
                 is_favorite=sid in favorite_ids,
             ),
         })

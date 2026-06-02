@@ -9,6 +9,7 @@ import { Favorites } from './components/Favorites'
 import { Reddit } from './components/Reddit'
 import { DigestArchive } from './components/DigestArchive'
 import { Newsletter } from './components/Newsletter'
+import { TeamsPost } from './components/TeamsPost'
 import { useStories } from './hooks/useStories'
 import { useDigest } from './hooks/useDigest'
 import { useDashboardStories } from './hooks/useDashboardStories'
@@ -187,6 +188,8 @@ export default function App() {
         )}
 
         {view === 'settings' && <Settings />}
+
+        {view === 'teams' && <TeamsPost />}
 
         {view === 'all' && (
           <>

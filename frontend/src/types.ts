@@ -4,6 +4,7 @@ export interface Story {
   id: number
   title_de: string
   primary_title: string | null
+  primary_url: string | null
   summary_de: string | null
   tags: string[]
   source_count: number
@@ -53,7 +54,7 @@ export interface Filters {
   sort: SortOrder
 }
 
-export type View = 'dashboard' | 'all' | 'favorites' | 'reddit' | 'newsletter' | 'archive' | 'settings'
+export type View = 'dashboard' | 'all' | 'favorites' | 'reddit' | 'newsletter' | 'archive' | 'settings' | 'teams'
 
 export interface RedditPost {
   id: number
