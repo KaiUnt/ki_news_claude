@@ -4,6 +4,7 @@ import { fetchFavorites, fetchStories, fetchStoryDetail } from '../api'
 
 type ContentBlock =
   | { kind: 'story'; storyId: number }
+  | { kind: 'heading'; id: string; content: string }
   | { kind: 'text'; id: string; content: string }
 
 const DEFAULT_FILTERS: Filters = {
@@ -42,15 +43,24 @@ function StorySelectRow({
   )
 }
 
-function InsertTextButton({ onInsert }: { onInsert: () => void }) {
+function InsertBlockButtons({
+  onInsertHeading, onInsertText,
+}: { onInsertHeading: () => void; onInsertText: () => void }) {
   return (
-    <div className="flex justify-center py-1">
+    <div className="flex justify-center gap-2 py-1">
       <button
         type="button"
-        onClick={onInsert}
-        className="text-xs text-slate-600 hover:text-indigo-400 hover:bg-slate-800 px-3 py-0.5 rounded transition-colors"
+        onClick={onInsertHeading}
+        className="text-xs text-slate-600 hover:text-teal-400 hover:bg-slate-800 px-2.5 py-0.5 rounded transition-colors"
       >
-        + Textabschnitt einfügen
+        + Überschrift
+      </button>
+      <button
+        type="button"
+        onClick={onInsertText}
+        className="text-xs text-slate-600 hover:text-indigo-400 hover:bg-slate-800 px-2.5 py-0.5 rounded transition-colors"
+      >
+        + Textabschnitt
       </button>
     </div>
   )
@@ -98,6 +108,10 @@ function StoryBlock({
         <p className="flex-1 text-sm text-slate-200 font-medium leading-snug line-clamp-2">{title}</p>
         <BlockControls index={index} total={total} onMoveUp={onMoveUp} onMoveDown={onMoveDown} onRemove={onRemove} />
       </div>
+      {/* Summary */}
+      {story?.summary_de && (
+        <p className="text-xs text-slate-400 leading-relaxed line-clamp-3 pl-5">{story.summary_de}</p>
+      )}
       {/* URL selector */}
       {isLoadingSources ? (
         <div className="flex items-center gap-2 pl-5">
@@ -121,6 +135,33 @@ function StoryBlock({
           {selectedUrl ?? story?.primary_url ?? 'Kein Link verfügbar'}
         </p>
       )}
+    </div>
+  )
+}
+
+function HeadingBlock({
+  block, index, total,
+  onUpdateText, onMoveUp, onMoveDown, onRemove,
+}: {
+  block: { kind: 'heading'; id: string; content: string }
+  index: number
+  total: number
+  onUpdateText: (content: string) => void
+  onMoveUp: () => void
+  onMoveDown: () => void
+  onRemove: () => void
+}) {
+  return (
+    <div className="bg-teal-900/20 border border-teal-700/40 rounded-lg p-2.5 flex items-center gap-2">
+      <span className="text-teal-500 text-xs shrink-0">H</span>
+      <input
+        type="text"
+        value={block.content}
+        onChange={e => onUpdateText(e.target.value)}
+        placeholder="Überschrift…"
+        className="flex-1 text-sm font-semibold bg-transparent text-slate-200 placeholder:text-slate-600 focus:outline-none"
+      />
+      <BlockControls index={index} total={total} onMoveUp={onMoveUp} onMoveDown={onMoveDown} onRemove={onRemove} />
     </div>
   )
 }
@@ -163,6 +204,7 @@ export function TeamsPost() {
   const [loadingSources, setLoadingSources] = useState<Set<number>>(new Set())
 
   const [weeks, setWeeks] = useState<FavoriteWeek[]>([])
+  const [openWeeks, setOpenWeeks] = useState<Set<string>>(new Set())
   const [favLoading, setFavLoading] = useState(true)
   const [favError, setFavError] = useState<string | null>(null)
 
@@ -180,6 +222,10 @@ export function TeamsPost() {
     fetchFavorites()
       .then(data => {
         setWeeks(data.weeks)
+        // Open only the most recent (first) week by default
+        if (data.weeks.length > 0) {
+          setOpenWeeks(new Set([data.weeks[0].week_start]))
+        }
         const map = new Map<number, Story>()
         data.weeks.forEach((w: FavoriteWeek) => w.items.forEach(item => map.set(item.story.id, item.story)))
         setStoryMap(map)
@@ -220,24 +266,19 @@ export function TeamsPost() {
       return
     }
 
-    // Add to storyMap if not there yet
     setStoryMap(prev => prev.has(id) ? prev : new Map(prev).set(id, story))
     setBlocks(prev => [...prev, { kind: 'story', storyId: id }])
 
-    // Fetch sources if not already loaded
     if (!storySourcesMap.has(id)) {
       setLoadingSources(prev => new Set(prev).add(id))
       try {
         const detail = await fetchStoryDetail(id)
         setStorySourcesMap(prev => new Map(prev).set(id, detail.sources))
-        // Set default URL: primary_url from story, or first source
         const defaultUrl = story.primary_url ?? detail.sources[0]?.url
         if (defaultUrl) {
           setSelectedUrls(prev => prev.has(id) ? prev : new Map(prev).set(id, defaultUrl))
         }
-      } catch {
-        // ignore — story block still works, just no URL dropdown
-      } finally {
+      } catch { /* ignore */ } finally {
         setLoadingSources(prev => { const next = new Set(prev); next.delete(id); return next })
       }
     }
@@ -256,16 +297,27 @@ export function TeamsPost() {
   const removeBlock = (index: number) => setBlocks(prev => prev.filter((_, i) => i !== index))
 
   // afterIndex === -1 inserts at position 0
-  const addTextBlock = (afterIndex: number) => {
+  const addBlock = (afterIndex: number, kind: 'heading' | 'text') => {
     setBlocks(prev => {
       const next = [...prev]
-      next.splice(afterIndex + 1, 0, { kind: 'text', id: makeId(), content: '' })
+      next.splice(afterIndex + 1, 0, { kind, id: makeId(), content: '' })
       return next
     })
   }
 
-  const updateTextBlock = (id: string, content: string) =>
-    setBlocks(prev => prev.map(b => b.kind === 'text' && b.id === id ? { ...b, content } : b))
+  const updateContentBlock = (id: string, content: string) =>
+    setBlocks(prev => prev.map(b =>
+      (b.kind === 'text' || b.kind === 'heading') && b.id === id ? { ...b, content } : b
+    ))
+
+  const toggleWeek = (weekStart: string) => {
+    setOpenWeeks(prev => {
+      const next = new Set(prev)
+      if (next.has(weekStart)) next.delete(weekStart)
+      else next.add(weekStart)
+      return next
+    })
+  }
 
   function buildTeamsText(): string {
     const parts: string[] = [header]
@@ -319,21 +371,34 @@ export function TeamsPost() {
           {!favLoading && !favError && weeks.length === 0 && (
             <p className="text-xs text-slate-500 px-3">Noch keine Favoriten vorhanden.</p>
           )}
-          {weeks.map(week => (
-            <div key={week.week_start} className="mb-5">
-              <p className="text-xs text-slate-500 px-3 mb-1 font-medium">{week.label}</p>
-              <div className="space-y-0.5">
-                {week.items.map(item => (
-                  <StorySelectRow
-                    key={item.story.id}
-                    story={item.story}
-                    checked={selectedStoryIds.includes(item.story.id)}
-                    onToggle={() => toggleStory(item.story.id, item.story)}
-                  />
-                ))}
+          {weeks.map(week => {
+            const isOpen = openWeeks.has(week.week_start)
+            return (
+              <div key={week.week_start} className="mb-2">
+                <button
+                  type="button"
+                  onClick={() => toggleWeek(week.week_start)}
+                  className="flex items-center gap-2 w-full text-left px-3 py-1.5 rounded-md hover:bg-slate-800/50 transition-colors"
+                >
+                  <span className={`text-[10px] text-slate-500 transition-transform duration-150 ${isOpen ? 'rotate-90' : ''}`}>▶</span>
+                  <span className="text-xs font-medium text-slate-400">{week.label}</span>
+                  <span className="ml-auto text-xs text-slate-600">{week.items.length}</span>
+                </button>
+                {isOpen && (
+                  <div className="space-y-0.5 mt-0.5">
+                    {week.items.map(item => (
+                      <StorySelectRow
+                        key={item.story.id}
+                        story={item.story}
+                        checked={selectedStoryIds.includes(item.story.id)}
+                        onToggle={() => toggleStory(item.story.id, item.story)}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            )
+          })}
         </section>
 
         {/* Weitere Artikel */}
@@ -411,8 +476,10 @@ export function TeamsPost() {
           className="w-full px-3 py-2 text-sm bg-slate-800/60 border border-slate-700 rounded-lg text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 resize-none"
         />
 
-        {/* Insert before first block */}
-        <InsertTextButton onInsert={() => addTextBlock(-1)} />
+        <InsertBlockButtons
+          onInsertHeading={() => addBlock(-1, 'heading')}
+          onInsertText={() => addBlock(-1, 'text')}
+        />
 
         {/* Blocks */}
         {blocks.length === 0 && (
@@ -436,18 +503,31 @@ export function TeamsPost() {
                 onMoveDown={() => moveBlock(index, 1)}
                 onRemove={() => removeBlock(index)}
               />
+            ) : block.kind === 'heading' ? (
+              <HeadingBlock
+                block={block}
+                index={index}
+                total={blocks.length}
+                onUpdateText={content => updateContentBlock(block.id, content)}
+                onMoveUp={() => moveBlock(index, -1)}
+                onMoveDown={() => moveBlock(index, 1)}
+                onRemove={() => removeBlock(index)}
+              />
             ) : (
               <TextBlock
                 block={block}
                 index={index}
                 total={blocks.length}
-                onUpdateText={content => updateTextBlock(block.id, content)}
+                onUpdateText={content => updateContentBlock(block.id, content)}
                 onMoveUp={() => moveBlock(index, -1)}
                 onMoveDown={() => moveBlock(index, 1)}
                 onRemove={() => removeBlock(index)}
               />
             )}
-            <InsertTextButton onInsert={() => addTextBlock(index)} />
+            <InsertBlockButtons
+              onInsertHeading={() => addBlock(index, 'heading')}
+              onInsertText={() => addBlock(index, 'text')}
+            />
           </div>
         ))}
 
