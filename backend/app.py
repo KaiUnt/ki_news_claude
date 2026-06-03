@@ -41,8 +41,22 @@ app.add_middleware(
 )
 
 
+def _configure_logging() -> None:
+    """Sorgt dafür, dass app/pipeline-Logs (logger.info "[fetch] …") im
+    Backend-Journal landen. uvicorn konfiguriert nur seine eigenen Logger und
+    lässt unseren `backend`-Logger sonst auf WARNING ohne Handler."""
+    backend_logger = logging.getLogger("backend")
+    backend_logger.setLevel(logging.INFO)
+    if not backend_logger.handlers:
+        handler = logging.StreamHandler()  # stderr → journald
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        backend_logger.addHandler(handler)
+    backend_logger.propagate = False
+
+
 @app.on_event("startup")
 def on_startup():
+    _configure_logging()
     create_db_and_tables()
 
 
