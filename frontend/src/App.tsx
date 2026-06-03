@@ -15,7 +15,7 @@ import { useDashboardStories } from './hooks/useDashboardStories'
 import { useDigestArchive } from './hooks/useDigestArchive'
 import { usePersistedFilters } from './hooks/usePersistedFilters'
 import { usePersistedView } from './hooks/usePersistedView'
-import { addFavorite, fetchStats, removeFavorite, triggerFetch } from './api'
+import { addFavorite, fetchStats, fetchFetchStatus, removeFavorite, triggerFetch } from './api'
 import type { Filters, Story } from './types'
 
 const DEFAULT_FILTERS: Filters = {
@@ -47,17 +47,49 @@ export default function App() {
     fetchStats().then(setStats).catch(() => {})
   }, [])
 
+  // Läuft beim Laden schon ein Fetch (Daily-Timer / anderer Tab)? Dann Spinner
+  // fortsetzen und nach Abschluss die Views aktualisieren.
+  useEffect(() => {
+    let cancelled = false
+    fetchFetchStatus()
+      .then(status => {
+        if (cancelled || !status.running) return
+        setRefreshing(true)
+        pollFetchUntilDone()
+          .then(refreshViews)
+          .finally(() => { if (!cancelled) setRefreshing(false) })
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Pollt den Fetch-Status, bis der Hintergrund-Lauf fertig ist (Cap ~45 Min).
+  async function pollFetchUntilDone() {
+    const startedAt = Date.now()
+    let status = await fetchFetchStatus()
+    while (status.running && Date.now() - startedAt < 45 * 60 * 1000) {
+      await new Promise(r => setTimeout(r, 4000))
+      status = await fetchFetchStatus()
+    }
+  }
+
+  async function refreshViews() {
+    stories.refresh()
+    digest.refresh()
+    setDashboardRefreshKey(k => k + 1)
+    setArchiveRefreshKey(k => k + 1)
+    const s = await fetchStats()
+    setStats(s)
+  }
+
   async function handleRefresh() {
     if (refreshing) return
     setRefreshing(true)
     try {
-      await triggerFetch()
-      stories.refresh()
-      digest.refresh()
-      setDashboardRefreshKey(k => k + 1)
-      setArchiveRefreshKey(k => k + 1)
-      const s = await fetchStats()
-      setStats(s)
+      await triggerFetch()           // startet im Hintergrund, kehrt sofort zurück
+      await pollFetchUntilDone()     // wartet, bis der Lauf durch ist
+      await refreshViews()
     } catch {
       // Fehler werden in den jeweiligen Views sichtbar
     } finally {

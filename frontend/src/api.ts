@@ -70,12 +70,29 @@ export interface FetchResult {
   fetched: number
   new_saved: number
   clustered: number
+  stories_merged: number
   stories_summarized: number
   digest_id: number | null
+  category_digest_ids: number[]
 }
 
-export async function triggerFetch(): Promise<FetchResult> {
+export interface FetchStatus {
+  running: boolean
+  started_at: string | null
+  finished_at: string | null
+  result: FetchResult | null
+  error: string | null
+}
+
+// Startet die Pipeline im Hintergrund; Fortschritt via fetchFetchStatus().
+export async function triggerFetch(): Promise<{ status: 'started' | 'already_running' }> {
   const res = await fetch(`${BASE}/fetch`, { method: 'POST' })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
+export async function fetchFetchStatus(): Promise<FetchStatus> {
+  const res = await fetch(`${BASE}/fetch/status`)
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.json()
 }

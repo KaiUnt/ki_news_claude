@@ -12,14 +12,8 @@ from .db import (
     Article, Story, UserProfile, DailyDigest, FavoriteStory, RedditPost, ManagedSource,
     SystemSetting, Category, PromptSetting,
     create_db_and_tables, engine,
-    get_existing_urls, get_existing_hashes,
-    get_unclustered_articles,
 )
-from .fetcher import RSSFetcher, HackerNewsFetcher, RawArticle, RedditFetcher, NewsletterFetcher
-from .deduplicator import deduplicate, content_hash
-from .clusterer import cluster_articles
-from .summarizer import Summarizer
-from . import digest_generator
+from . import digest_generator, pipeline
 from .config import STORY_TYPES, STORY_DOMAINS, STORY_FLAGS, normalize_tags, settings, RSS_FEEDS, NEWSLETTER_SOURCES
 from .source_catalog import list_source_configs, story_signals_for_source_names, PAPER_SOURCES
 
@@ -28,6 +22,13 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="KI-News Dashboard API", version="2.0.0")
 
 _fetch_lock = threading.Lock()
+_fetch_status: dict = {
+    "running": False,
+    "started_at": None,
+    "finished_at": None,
+    "result": None,
+    "error": None,
+}
 
 DEFAULT_PROFILE_ID = 1
 LOCAL_TZ = tz.gettz("Europe/Vienna") or timezone(timedelta(hours=1), "Europe/Vienna")
@@ -628,7 +629,27 @@ def get_stats():
     }
 
 
-# ── Manual trigger ────────────────────────────────────────────────────────────
+# ── Manual trigger (Background-Task) ──────────────────────────────────────────
+
+def _run_pipeline_bg(cluster: bool, summarize: bool, digest: bool) -> None:
+    """Läuft im Hintergrund-Thread; schreibt Status, gibt am Ende den Lock frei."""
+    try:
+        result = pipeline.run_pipeline(
+            cluster=cluster,
+            summarize=summarize,
+            digest=digest,
+            on_event=lambda msg: logger.info("[fetch] %s", msg),
+        )
+        _fetch_status["result"] = result
+        _fetch_status["error"] = None
+    except Exception as exc:
+        logger.exception("[fetch] pipeline failed")
+        _fetch_status["error"] = str(exc)
+    finally:
+        _fetch_status["running"] = False
+        _fetch_status["finished_at"] = datetime.utcnow().isoformat()
+        _fetch_lock.release()
+
 
 @app.post("/api/fetch")
 def trigger_fetch(
@@ -636,133 +657,31 @@ def trigger_fetch(
     summarize: bool = Query(True),
     digest: bool = Query(True),
 ):
-    """Fetch → dedup → save → cluster → summarize → digest pipeline."""
+    """Startet die Pipeline im Hintergrund und kehrt sofort zurück.
+
+    Fortschritt/Ergebnis sind über GET /api/fetch/status abrufbar.
+    """
     if not _fetch_lock.acquire(blocking=False):
-        raise HTTPException(status_code=409, detail="Fetch already in progress")
-    try:
-        return _run_fetch(cluster=cluster, summarize=summarize, digest=digest)
-    finally:
-        _fetch_lock.release()
+        return {"status": "already_running"}
+    _fetch_status.update(
+        running=True,
+        started_at=datetime.utcnow().isoformat(),
+        finished_at=None,
+        result=None,
+        error=None,
+    )
+    threading.Thread(
+        target=_run_pipeline_bg,
+        args=(cluster, summarize, digest),
+        daemon=True,
+    ).start()
+    return {"status": "started"}
 
 
-def _run_fetch(cluster: bool, summarize: bool, digest: bool) -> dict:
-    # All sources come from DB (seeded from config.py; user-added sources included automatically)
-    with Session(engine) as session:
-        active_sources = session.exec(
-            select(ManagedSource).where(ManagedSource.active == True)
-        ).all()
-
-    rss_feeds = [{"name": s.name, "url": s.url} for s in active_sources if s.source_type == "rss"]
-    nl_sources = [{"name": s.name, "from_email": s.url} for s in active_sources if s.source_type == "newsletter"]
-    run_hn = any(s.source_type == "hackernews" for s in active_sources)
-
-    fetchers = [
-        RSSFetcher(feeds=rss_feeds),
-        NewsletterFetcher(sources=nl_sources),
-    ]
-    if run_hn:
-        fetchers.append(HackerNewsFetcher())
-    raw: list[RawArticle] = []
-    for f in fetchers:
-        raw.extend(f.fetch())
-
-    with Session(engine) as session:
-        existing_urls = get_existing_urls(session)
-        existing_hashes = get_existing_hashes(session)
-
-    new_raw = deduplicate(raw, existing_urls, existing_hashes)
-
-    # Save
-    saved = 0
-    for raw_art in new_raw:
-        db_article = Article(
-            url=raw_art.url,
-            title=raw_art.title,
-            source_name=raw_art.source_name,
-            source_type=raw_art.source_type,
-            published_at=raw_art.published_at,
-            raw_content=raw_art.content[:500] if raw_art.content else None,
-            content_hash=content_hash(raw_art),
-            story_id=None,
-        )
-        with Session(engine) as session:
-            try:
-                session.add(db_article)
-                session.commit()
-                saved += 1
-            except Exception:
-                session.rollback()
-
-    # Cluster — newsletter articles use a wider 8-day window so weekly
-    # newsletters can connect to RSS stories published up to 8 days ago.
-    # Non-newsletter articles use the standard 3-day window.
-    clustered = 0
-    if cluster:
-        with Session(engine) as session:
-            unclustered = get_unclustered_articles(session)
-
-        nl_articles    = [a for a in unclustered if a.source_type == "newsletter"]
-        other_articles = [a for a in unclustered if a.source_type != "newsletter"]
-
-        all_assignments: dict[int, int] = {}
-        if nl_articles:
-            all_assignments.update(cluster_articles(nl_articles, story_days=8))
-        if other_articles:
-            all_assignments.update(cluster_articles(other_articles, story_days=3))
-
-        clustered = len(all_assignments)
-        with Session(engine) as session:
-            for article_id, story_id in all_assignments.items():
-                article = session.get(Article, article_id)
-                if article:
-                    article.story_id = story_id
-                    session.add(article)
-            session.commit()
-
-    # Story-merge: consolidate semantic duplicates created by clustering
-    merged = 0
-    if cluster:
-        from .story_merger import merge_recent_stories
-        merged = merge_recent_stories()
-
-    # Summarize
-    summarized = 0
-    if summarize and cluster:
-        summarizer = Summarizer()
-        summarized = summarizer.summarize_pending_stories()
-
-    # Digest — global first, then per active category
-    digest_id: Optional[int] = None
-    category_digest_ids: list[int] = []
-    if digest and cluster and summarize:
-        try:
-            generated = digest_generator.generate()
-            if generated is not None:
-                digest_id = generated.id
-        except Exception as exc:
-            logger.error("[fetch] Global digest generation failed: %s", exc)
-
-        with Session(engine) as session:
-            active_cats = list(session.exec(
-                select(Category).where(Category.active == True)
-            ).all())
-        for cat in active_cats:
-            try:
-                cat_digest = digest_generator.generate(category_id=cat.id)
-                if cat_digest is not None:
-                    category_digest_ids.append(cat_digest.id)
-            except Exception as exc:
-                logger.error("[fetch] Category digest '%s' failed: %s", cat.slug, exc)
-
-    return {
-        "fetched": len(raw),
-        "new_saved": saved,
-        "clustered": clustered,
-        "stories_merged": merged,
-        "stories_summarized": summarized,
-        "digest_id": digest_id,
-        "category_digest_ids": category_digest_ids,
-    }
+@app.get("/api/fetch/status")
+def fetch_status():
+    """Status des laufenden bzw. letzten Fetch-Laufs (Frontend pollt darauf)."""
+    return _fetch_status
 
 
 # ── Reddit endpoints ──────────────────────────────────────────────────────────
