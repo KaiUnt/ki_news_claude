@@ -18,12 +18,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from backend.db import (
     create_db_and_tables, engine,
     get_existing_urls, get_existing_hashes,
-    get_unclustered_articles, Article,
+    get_unclustered_articles, Article, Category,
 )
 from backend.fetcher import RSSFetcher, HackerNewsFetcher, RawArticle
 from backend.deduplicator import deduplicate, content_hash
@@ -145,8 +145,9 @@ def main(cluster: bool = True, summarize: bool = True, digest: bool = True) -> N
     elif not summarize:
         console.print("[yellow]Zusammenfassung übersprungen (--no-summarize).[/yellow]")
 
-    # ── Phase 6: Tages-Digest ─────────────────────────────────────────────────
+    # ── Phase 6: Tages-Digest (global + pro aktiver Kategorie) ────────────────
     digest_status = "–"
+    category_digest_status = "–"
     if digest and cluster and summarize:
         console.print(f"\n[cyan]Tages-Digest via Claude API...[/cyan]")
         with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console) as progress:
@@ -162,6 +163,27 @@ def main(cluster: bool = True, summarize: bool = True, digest: bool = True) -> N
             except Exception as exc:
                 digest_status = f"Fehler: {exc}"
                 progress.update(task, description=f"[red]Digest fehlgeschlagen: {exc}[/red]")
+
+            # Per-Kategorie-Digests für alle aktiven Kategorien (spiegelt _run_fetch in app.py)
+            with Session(engine) as session:
+                active_cats = list(session.exec(
+                    select(Category).where(Category.active == True)
+                ).all())
+            cat_digest_ids: list[int] = []
+            for cat in active_cats:
+                progress.update(task, description=f"[cyan]Kategorie-Digest '{cat.slug}'...[/cyan]")
+                try:
+                    cat_digest = digest_generator.generate(category_id=cat.id)
+                    if cat_digest is not None:
+                        cat_digest_ids.append(cat_digest.id)
+                except Exception as exc:
+                    console.print(f"[red]Kategorie-Digest '{cat.slug}' fehlgeschlagen: {exc}[/red]")
+            if active_cats:
+                category_digest_status = (
+                    ", ".join(f"id={i}" for i in cat_digest_ids)
+                    if cat_digest_ids else "keine erzeugt"
+                )
+            progress.update(task, description="[green]Digests fertig[/green]")
     elif not digest:
         console.print("[yellow]Digest übersprungen (--no-digest).[/yellow]")
 
@@ -175,6 +197,7 @@ def main(cluster: bool = True, summarize: bool = True, digest: bool = True) -> N
     table.add_row("Duplikate gemergt", str(merged) if cluster else "–")
     table.add_row("Stories summarisiert", str(summarized) if summarize else "–")
     table.add_row("Digest", digest_status if digest else "–")
+    table.add_row("Kategorie-Digests", category_digest_status if digest else "–")
     console.print(table)
     console.rule("[bold green]Fertig[/bold green]")
 
