@@ -46,6 +46,7 @@ def main(cluster: bool = True, summarize: bool = True, digest: bool = True) -> N
     table.add_column("Wert", justify="right", style="green")
     table.add_row("Gefetcht", str(result["fetched"]))
     table.add_row("Neu gespeichert", str(result["new_saved"]))
+    table.add_row("Paper-Stories (direkt)", str(result.get("papers_routed", 0)) if cluster else "–")
     table.add_row("Geclustert", str(result["clustered"]) if cluster else "–")
     table.add_row("Duplikate gemergt", str(result["stories_merged"]) if cluster else "–")
     table.add_row("Stories summarisiert", str(result["stories_summarized"]) if summarize else "–")

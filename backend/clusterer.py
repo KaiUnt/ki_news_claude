@@ -5,7 +5,6 @@ Sends article titles + open story titles to Claude, which assigns
 each article to an existing story or creates a new one.
 Batches up to BATCH_SIZE articles per call for cost efficiency.
 """
-import json
 import logging
 import anthropic
 from datetime import datetime, timedelta
@@ -42,6 +41,35 @@ Antworte NUR als valides JSON-Array, kein Text davor/danach:
 [{"article_id": <int>, "story_id": <int_or_null>, "new_story_title": <string_or_null>}, ...]
 
 Jeder Artikel muss im Array vorkommen."""
+
+
+# Forced tool use replaces hand-serialized JSON output — a quote in a German
+# new_story_title can no longer break parsing (the old JSONDecodeError class).
+# story_id null/absent = neue Story; the existing cluster_articles logic reads
+# the fields via .get() and treats falsy story_id as "create new".
+_CLUSTER_TOOL = {
+    "name": "assign_articles",
+    "description": "Ordne jeden Artikel einer bestehenden Story zu oder eröffne eine neue Story.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "assignments": {
+                "type": "array",
+                "description": "Genau ein Eintrag pro Artikel.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "article_id": {"type": "integer"},
+                        "story_id": {"type": ["integer", "null"], "description": "ID einer bestehenden Story, oder null für neue Story."},
+                        "new_story_title": {"type": ["string", "null"], "description": "Kurzer dt. Titel der neuen Story (nur wenn story_id null)."},
+                    },
+                    "required": ["article_id"],
+                },
+            },
+        },
+        "required": ["assignments"],
+    },
+}
 
 
 def _fmt_date(dt: datetime | None) -> str:
@@ -89,16 +117,19 @@ def _call_claude(
                 "cache_control": {"type": "ephemeral"},
             }
         ],
+        tools=[_CLUSTER_TOOL],
+        tool_choice={"type": "tool", "name": _CLUSTER_TOOL["name"]},
         messages=[{"role": "user", "content": user_msg}],
     ))
 
-    raw = response.content[0].text.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-
-    return json.loads(raw)
+    for block in response.content:
+        if block.type == "tool_use" and isinstance(block.input, dict):
+            assignments = block.input.get("assignments")
+            if isinstance(assignments, list):
+                return assignments
+    # No usable tool_use block (e.g. max_tokens truncation) — let _call_claude_safe
+    # fall back to solo stories rather than silently dropping the whole batch.
+    raise ValueError(f"clusterer: no tool_use assignments (stop_reason={response.stop_reason})")
 
 
 def cluster_articles(articles: list[Article], story_days: int = 3) -> dict[int, int]:
@@ -126,6 +157,13 @@ def cluster_articles(articles: list[Article], story_days: int = 3) -> dict[int, 
             paper_only_ids = _paper_only_story_ids(
                 session, [s.id for s in open_stories if s.id is not None]
             )
+
+        # Paper-only stories are created deterministically (paper_router) and never
+        # need clustering — drop them from the prompt entirely. They were ~75% of
+        # the open-stories block; sending them re-bloated every batch's input for
+        # nothing. With no papers in the prompt the [PAPER] marker and the reroute
+        # guard below naturally no-op, but stay as defense-in-depth.
+        open_stories = [s for s in open_stories if s.id not in paper_only_ids]
 
         assignments = _call_claude_safe(batch, open_stories, paper_only_ids)
 
@@ -271,7 +309,7 @@ def _call_claude_safe(
 ) -> list[dict]:
     try:
         return _call_claude(articles, open_stories, paper_only_ids)
-    except (json.JSONDecodeError, Exception) as exc:
+    except Exception as exc:
         logger.error("[Clusterer] Error: %s — falling back to solo stories", exc)
         # Fallback: each article gets its own story
         return [

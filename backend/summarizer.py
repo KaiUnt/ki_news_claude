@@ -6,7 +6,6 @@ to generate a German summary. For non-paper stories Claude also classifies the
 story on three axes (type / domains / flags); paper stories skip the tag step.
 is_processed=True afterwards.
 """
-import json
 import logging
 import anthropic
 from sqlmodel import Session, select
@@ -73,6 +72,41 @@ Antworte ausschließlich als gültiges JSON (kein Markdown):
 Regeln:
 - Sachlich, max 3 Sätze.
 - Direkt einsteigen, kein "Diese Arbeit untersucht..."-Geschwafel."""
+
+
+# Flags the model itself is allowed to assign (newsletter/kuratiert are set
+# programmatically, not by Claude — see summarize_pending_stories / paper_router).
+_MODEL_FLAGS = ["open-source", "frontier", "big-lab"]
+
+# Forced tool use replaces hand-serialized JSON output. The model fills these
+# fields and the SDK returns a parsed dict, so a stray unescaped quote inside a
+# German summary can no longer break parsing (the old JSONDecodeError class).
+_GENERAL_TOOL = {
+    "name": "classify_story",
+    "description": "Gib die deutsche Zusammenfassung und die Klassifikation der Story zurück.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "summary_de": {"type": "string", "description": "2–3 prägnante Sätze auf Deutsch, sachlich, kein Marketing-Sprech."},
+            "type": {"type": "string", "enum": STORY_TYPES, "description": "Genau ein Typ — der dominanteste Aspekt der Story."},
+            "domains": {"type": "array", "items": {"type": "string", "enum": STORY_DOMAINS}, "description": "1–2 Domains; bei keiner klaren Passung [\"sonstige\"]."},
+            "flags": {"type": "array", "items": {"type": "string", "enum": _MODEL_FLAGS}, "description": "0+ Flags, nur wenn klar zutreffend."},
+        },
+        "required": ["summary_de", "type", "domains", "flags"],
+    },
+}
+
+_PAPER_TOOL = {
+    "name": "summarize_paper",
+    "description": "Gib die deutsche Zusammenfassung des Papers zurück.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "summary_de": {"type": "string", "description": "2–3 prägnante Sätze auf Deutsch: Was wurde untersucht, was ist das Ergebnis?"},
+        },
+        "required": ["summary_de"],
+    },
+}
 
 
 def _build_tags(result: dict) -> list[str]:
@@ -152,7 +186,7 @@ class Summarizer:
         )
         with Session(engine) as s:
             prompt = get_prompt(s, "summarizer_general", _GENERAL_SYSTEM_PROMPT)
-        return self._call(user_content, prompt, max_tokens=512)
+        return self._call(user_content, prompt, max_tokens=512, tool=_GENERAL_TOOL)
 
     def _call_paper(self, story: Story, best_article: Article) -> dict:
         user_content = (
@@ -162,17 +196,22 @@ class Summarizer:
         )
         with Session(engine) as s:
             prompt = get_prompt(s, "summarizer_paper", _PAPER_SYSTEM_PROMPT)
-        return self._call(user_content, prompt, max_tokens=256)
+        return self._call(user_content, prompt, max_tokens=256, tool=_PAPER_TOOL)
 
-    def _call(self, user_content: str, system_prompt: str, max_tokens: int) -> dict:
-        """Call Claude and return parsed JSON.
+    def _call(self, user_content: str, system_prompt: str, max_tokens: int, tool: dict) -> dict:
+        """Call Claude with a forced tool and return the tool's parsed input dict.
 
-        - On transient failure (network, non-truncation JSON error): returns
-          {"summary_de": None} so the caller leaves the story unprocessed and
-          a future run retries it.
-        - On max_tokens truncation (stop_reason confirms it): returns a
-          placeholder summary so the caller marks the story is_processed=True
-          and stops retrying — the same prompt would truncate again forever.
+        Forcing the tool (tool_choice) means the model fills the schema and the
+        SDK hands back an already-parsed dict — no hand-serialized JSON, so the
+        old "unescaped quote breaks json.loads" failures can't happen. The
+        prompt's JSON-format wording is now advisory and overridden by the tool.
+
+        - On transient failure (network, no tool_use block): returns
+          {"summary_de": None} so the caller leaves the story unprocessed and a
+          future run retries it.
+        - On max_tokens truncation (incomplete tool input): returns a placeholder
+          so the caller marks the story is_processed=True and stops retrying —
+          the same prompt would truncate again forever.
         """
         try:
             response = call_with_retry(lambda: self._client.messages.create(
@@ -185,27 +224,25 @@ class Summarizer:
                         "cache_control": {"type": "ephemeral"},
                     }
                 ],
+                tools=[tool],
+                tool_choice={"type": "tool", "name": tool["name"]},
                 messages=[{"role": "user", "content": user_content}],
             ))
-            raw = response.content[0].text.strip()
-            if raw.startswith("```"):
-                raw = raw.split("```")[1]
-                if raw.startswith("json"):
-                    raw = raw[4:]
-            try:
-                return json.loads(raw)
-            except json.JSONDecodeError as exc:
-                if response.stop_reason == "max_tokens":
-                    logger.warning(
-                        "[Summarizer] Truncated at max_tokens=%d — marking processed with placeholder",
-                        max_tokens,
-                    )
-                    return {"summary_de": "(Zusammenfassung fehlgeschlagen — Antwort zu lang)"}
+            for block in response.content:
+                if block.type == "tool_use" and isinstance(block.input, dict):
+                    if block.input.get("summary_de"):
+                        return block.input
+            if response.stop_reason == "max_tokens":
                 logger.warning(
-                    "[Summarizer] JSON decode failed (stop_reason=%s): %s — story stays unprocessed",
-                    response.stop_reason, exc,
+                    "[Summarizer] Tool input truncated at max_tokens=%d — marking processed with placeholder",
+                    max_tokens,
                 )
-                return {"summary_de": None}
+                return {"summary_de": "(Zusammenfassung fehlgeschlagen — Antwort zu lang)"}
+            logger.warning(
+                "[Summarizer] No usable tool_use block (stop_reason=%s) — story stays unprocessed",
+                response.stop_reason,
+            )
+            return {"summary_de": None}
         except Exception as exc:
             logger.error("[Summarizer] Error: %s", exc)
             return {"summary_de": None}

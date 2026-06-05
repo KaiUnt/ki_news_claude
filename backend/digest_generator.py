@@ -46,6 +46,35 @@ Antworte ausschließlich als gültiges JSON, kein Markdown:
 }"""
 
 
+# Forced tool use replaces hand-serialized JSON output. meta_summary_de is long
+# German prose (the highest unescaped-quote risk of all three pipelines) — having
+# the SDK return a parsed dict eliminates that JSONDecodeError class entirely.
+_DIGEST_TOOL = {
+    "name": "publish_digest",
+    "description": "Gib die Tageszusammenfassung und die kuratierten Top-Stories zurück.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "meta_summary_de": {"type": "string", "description": "2–3 Absätze auf Deutsch, was heute in der KI-Welt passiert ist."},
+            "top_stories": {
+                "type": "array",
+                "description": "5–7 Stories, rank 1 = wichtigste.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "story_id": {"type": "integer"},
+                        "rank": {"type": "integer"},
+                        "why": {"type": "string", "description": "1 Satz, warum diese Story wichtig ist."},
+                    },
+                    "required": ["story_id", "rank", "why"],
+                },
+            },
+        },
+        "required": ["meta_summary_de", "top_stories"],
+    },
+}
+
+
 def generate(
     reuse_last_window: bool = False,
     category_id: Optional[int] = None,
@@ -269,7 +298,6 @@ def _call_safe(user_msg: str, system_prompt: str = _SYSTEM_PROMPT) -> Optional[t
     first_digest_id and exclude them from the next regular run — losing the
     most important stories of the day on a Claude outage.
     """
-    raw_for_debug: Optional[str] = None
     try:
         client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
         response = call_with_retry(lambda: client.messages.create(
@@ -282,15 +310,20 @@ def _call_safe(user_msg: str, system_prompt: str = _SYSTEM_PROMPT) -> Optional[t
                     "cache_control": {"type": "ephemeral"},
                 }
             ],
+            tools=[_DIGEST_TOOL],
+            tool_choice={"type": "tool", "name": _DIGEST_TOOL["name"]},
             messages=[{"role": "user", "content": user_msg}],
         ))
-        raw = response.content[0].text.strip()
-        raw_for_debug = raw
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        return json.loads(raw), raw_for_debug
+        for block in response.content:
+            if block.type == "tool_use" and isinstance(block.input, dict):
+                result = block.input
+                if result.get("meta_summary_de") and isinstance(result.get("top_stories"), list):
+                    return result, json.dumps(result, ensure_ascii=False)
+        logger.error(
+            "[DigestGenerator] No usable tool_use block (stop_reason=%s) — skipping persistence",
+            response.stop_reason,
+        )
+        return None
     except Exception as exc:
         logger.error("[DigestGenerator] Error: %s — skipping digest persistence", exc)
         return None

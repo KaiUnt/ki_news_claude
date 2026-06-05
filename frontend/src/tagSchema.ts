@@ -33,6 +33,8 @@ export const FLAG_LABELS: Record<string, string> = {
   'open-source': 'Open Source',
   frontier:      'Frontier',
   'big-lab':     'Big Lab',
+  newsletter:    'Newsletter',
+  kuratiert:     'Kuratiert',
 }
 
 export function tagAxis(tag: string): TagAxis | null {

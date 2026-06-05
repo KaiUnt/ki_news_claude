@@ -23,6 +23,7 @@ from .db import (
 from .fetcher import RSSFetcher, HackerNewsFetcher, NewsletterFetcher, RawArticle
 from .deduplicator import deduplicate, content_hash
 from .clusterer import cluster_articles
+from .paper_router import route_papers, is_paper_article
 from .story_merger import merge_recent_stories
 from .summarizer import Summarizer
 from . import digest_generator
@@ -105,16 +106,29 @@ def run_pipeline(
                 session.rollback()
 
     # ── Phase 4: Clustering ───────────────────────────────────────────────────
+    # Papers (arXiv/HuggingFace) bypass Claude entirely: each becomes a solo,
+    # pre-summarized story (siehe paper_router) — sie landen ohnehin nie im
+    # Digest, und Clustering/Summarizing für sie war der Großteil der API-Kosten.
     # Newsletter-Artikel nutzen ein breiteres 8-Tage-Fenster, damit wöchentliche
     # Newsletter an RSS-Stories bis zu 8 Tage zurück andocken können. Andere
     # Artikel nutzen das Standard-3-Tage-Fenster.
     clustered = 0
+    papers_routed = 0
     if cluster:
         with Session(engine) as session:
             unclustered = get_unclustered_articles(session)
 
-        nl_articles = [a for a in unclustered if a.source_type == "newsletter"]
-        other_articles = [a for a in unclustered if a.source_type != "newsletter"]
+        paper_articles: list[Article] = []
+        rest: list[Article] = []
+        for a in unclustered:
+            (paper_articles if is_paper_article(a) else rest).append(a)
+
+        if paper_articles:
+            papers_routed = route_papers(paper_articles)
+            _emit(on_event, f"{papers_routed} Paper-Stories direkt angelegt (ohne Claude)")
+
+        nl_articles = [a for a in rest if a.source_type == "newsletter"]
+        other_articles = [a for a in rest if a.source_type != "newsletter"]
 
         all_assignments: dict[int, int] = {}
         if nl_articles:
@@ -177,6 +191,7 @@ def run_pipeline(
     return {
         "fetched": len(raw),
         "new_saved": saved,
+        "papers_routed": papers_routed,
         "clustered": clustered,
         "stories_merged": merged,
         "stories_summarized": summarized,

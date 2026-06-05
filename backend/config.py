@@ -29,6 +29,7 @@ STORY_FLAGS = [
     "frontier",
     "big-lab",
     "newsletter",
+    "kuratiert",  # source-derived: curated paper feeds (HuggingFace Daily Papers)
 ]
 
 # Heuristic mapping for stories tagged before the schema rewrite. Applied at

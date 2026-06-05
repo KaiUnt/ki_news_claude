@@ -36,6 +36,13 @@ PAPER_SOURCES: frozenset[str] = frozenset({
 })
 _PAPER_SOURCES = PAPER_SOURCES  # internal alias kept for compatibility
 
+# Paper feeds that are human-curated (low volume, higher signal) rather than the
+# raw arXiv firehose. Stories from these get a flag:kuratiert tag in paper_router
+# so they're distinguishable/filterable in the Paper-Stream lane.
+CURATED_PAPER_SOURCES: frozenset[str] = frozenset({
+    "HuggingFace Daily Papers",
+})
+
 
 def _build_catalog() -> dict[str, SourceMetadata]:
     catalog: dict[str, SourceMetadata] = {}
