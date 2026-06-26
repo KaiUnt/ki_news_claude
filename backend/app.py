@@ -13,7 +13,7 @@ from .db import (
     SystemSetting, Category, PromptSetting,
     create_db_and_tables, engine,
 )
-from . import digest_generator, pipeline
+from . import digest_generator, pipeline, post_generator
 from .config import STORY_TYPES, STORY_DOMAINS, STORY_FLAGS, normalize_tags, settings, RSS_FEEDS, NEWSLETTER_SOURCES
 from .source_catalog import list_source_configs, story_signals_for_source_names, PAPER_SOURCES
 
@@ -454,6 +454,26 @@ def remove_favorite(story_id: int):
             session.commit()
 
     return {"ok": True, "story_id": story_id}
+
+
+class GeneratePostRequest(BaseModel):
+    story_ids: list[int]
+
+
+@app.post("/api/favorites/generate-post")
+def generate_favorites_post(req: GeneratePostRequest):
+    if not req.story_ids:
+        raise HTTPException(status_code=400, detail="Keine Story-IDs angegeben.")
+    if len(req.story_ids) > 50:
+        raise HTTPException(status_code=400, detail="Maximal 50 Stories pro Post.")
+    try:
+        result = post_generator.generate_post(req.story_ids)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error("[generate-post] Fehler: %s", e)
+        raise HTTPException(status_code=500, detail="Fehler beim Generieren des Posts.")
+    return result
 
 
 # ── Metadata endpoints ────────────────────────────────────────────────────────

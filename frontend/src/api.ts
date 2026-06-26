@@ -168,6 +168,29 @@ export async function removeFavorite(storyId: number): Promise<void> {
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
 }
 
+export interface GeneratedPostCluster {
+  title: string
+  intro: string
+  story_ids: number[]
+}
+
+export interface GeneratedPost {
+  clusters: GeneratedPostCluster[]
+}
+
+export async function generatePost(storyIds: number[]): Promise<GeneratedPost> {
+  const res = await fetch(`${BASE}/favorites/generate-post`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ story_ids: storyIds }),
+  })
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}))
+    throw new Error(detail?.detail ?? `HTTP ${res.status}`)
+  }
+  return res.json()
+}
+
 export type RedditSortOrder = 'score' | 'date' | 'ratio' | 'comments'
 
 export async function fetchRedditPosts(

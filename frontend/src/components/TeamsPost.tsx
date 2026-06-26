@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import type { FavoriteWeek, Story, Source, Filters } from '../types'
-import { fetchFavorites, fetchStories, fetchStoryDetail, addFavorite, removeFavorite } from '../api'
+import { fetchFavorites, fetchStories, fetchStoryDetail, addFavorite, removeFavorite, generatePost } from '../api'
 import { FilterBar } from './FilterBar'
 import { StoryCard } from './StoryCard'
 import { StoryDetailModal } from './StoryDetailModal'
@@ -277,6 +277,8 @@ export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
   const [headerOpen, setHeaderOpen] = useState(false)
   const [footerOpen, setFooterOpen] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [aiGenerating, setAiGenerating] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
 
   // Load favorites on mount
   useEffect(() => {
@@ -489,6 +491,66 @@ export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
     }
   }
 
+  async function handleGeneratePost() {
+    const storyIds = blocks
+      .filter((b): b is { kind: 'story'; storyId: number } => b.kind === 'story')
+      .map(b => b.storyId)
+
+    if (storyIds.length === 0) return
+
+    if (blocks.length > 0) {
+      const confirmed = window.confirm(
+        'Der aktuelle Editor-Inhalt wird durch den KI-Bericht ersetzt. Fortfahren?'
+      )
+      if (!confirmed) return
+    }
+
+    setAiGenerating(true)
+    setAiError(null)
+
+    try {
+      const result = await generatePost(storyIds)
+
+      // Fetch sources for all story IDs in one go (parallel)
+      const allStoryIds = result.clusters.flatMap(c => c.story_ids)
+      await Promise.allSettled(
+        allStoryIds
+          .filter(id => !storySourcesMap.has(id))
+          .map(async id => {
+            setLoadingSources(prev => new Set(prev).add(id))
+            try {
+              const detail = await fetchStoryDetail(id)
+              setStorySourcesMap(prev => new Map(prev).set(id, detail.sources))
+              const story = storyMap.get(id)
+              const defaultUrl = story?.primary_url ?? detail.sources[0]?.url
+              if (defaultUrl) {
+                setSelectedUrls(prev => prev.has(id) ? prev : new Map(prev).set(id, defaultUrl))
+              }
+            } catch { /* ignore */ } finally {
+              setLoadingSources(prev => { const next = new Set(prev); next.delete(id); return next })
+            }
+          })
+      )
+
+      // Build the new block list from the clusters
+      const newBlocks: typeof blocks = []
+      for (const cluster of result.clusters) {
+        newBlocks.push({ kind: 'heading', id: makeId(), content: cluster.title })
+        newBlocks.push({ kind: 'text', id: makeId(), content: cluster.intro })
+        for (const sid of cluster.story_ids) {
+          if (storyMap.has(sid)) {
+            newBlocks.push({ kind: 'story', storyId: sid })
+          }
+        }
+      }
+      setBlocks(newBlocks)
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : 'Unbekannter Fehler')
+    } finally {
+      setAiGenerating(false)
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
@@ -648,24 +710,56 @@ export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
       {editorOpen && <div className="w-[460px] shrink-0 flex flex-col min-h-0">
 
         {/* Copy bar — outside scroll area so it never overlaps content */}
-        <div className="flex-none pb-3 flex items-center justify-between">
-          <span className="text-xs text-slate-500">
-            {selectedStoryIds.length === 0
-              ? 'Noch keine Artikel ausgewählt'
-              : `${selectedStoryIds.length} Artikel ausgewählt`}
-          </span>
-          <button
-            type="button"
-            onClick={handleCopy}
-            disabled={blocks.length === 0}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-              copied
-                ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-600/40'
-                : 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/40 hover:bg-indigo-600/30 disabled:opacity-30 disabled:cursor-not-allowed'
-            }`}
-          >
-            {copied ? '✓ Kopiert!' : 'In Zwischenablage kopieren'}
-          </button>
+        <div className="flex-none pb-3 space-y-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs text-slate-500">
+              {selectedStoryIds.length === 0
+                ? 'Noch keine Artikel ausgewählt'
+                : `${selectedStoryIds.length} Artikel ausgewählt`}
+            </span>
+            <div className="flex items-center gap-2">
+              {/* KI-Bericht Button */}
+              <button
+                type="button"
+                onClick={handleGeneratePost}
+                disabled={selectedStoryIds.length === 0 || aiGenerating}
+                title="KI clustert die ausgewählten Stories automatisch in Themenabschnitte"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition-all
+                  bg-violet-600/20 text-violet-300 border-violet-500/40 hover:bg-violet-600/30
+                  disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                {aiGenerating ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border border-violet-400 border-t-transparent rounded-full animate-spin" />
+                    KI arbeitet…
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                    </svg>
+                    KI-Bericht
+                  </>
+                )}
+              </button>
+              {/* Copy Button */}
+              <button
+                type="button"
+                onClick={handleCopy}
+                disabled={blocks.length === 0}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                  copied
+                    ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-600/40'
+                    : 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/40 hover:bg-indigo-600/30 disabled:opacity-30 disabled:cursor-not-allowed'
+                }`}
+              >
+                {copied ? '✓ Kopiert!' : 'In Zwischenablage kopieren'}
+              </button>
+            </div>
+          </div>
+          {aiError && (
+            <p className="text-xs text-red-400 text-right">Fehler: {aiError}</p>
+          )}
         </div>
 
         {/* Scrollable content */}
