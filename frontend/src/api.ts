@@ -191,6 +191,37 @@ export async function generatePost(storyIds: number[]): Promise<GeneratedPost> {
   return res.json()
 }
 
+// ── Teams ─────────────────────────────────────────────────────────────────────
+
+export type TeamsBlock =
+  | { kind: 'story'; title: string; summary?: string; url?: string }
+  | { kind: 'heading'; content: string }
+  | { kind: 'text'; content: string }
+
+export interface TeamsPostPayload {
+  header: string
+  footer: string
+  blocks: TeamsBlock[]
+}
+
+export async function fetchTeamsStatus(): Promise<{ configured: boolean }> {
+  const res = await fetch(`${BASE}/teams/status`)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
+export async function postToTeams(payload: TeamsPostPayload): Promise<void> {
+  const res = await fetch(`${BASE}/teams/post`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail ?? `HTTP ${res.status}`)
+  }
+}
+
 export type RedditSortOrder = 'score' | 'date' | 'ratio' | 'comments'
 
 export async function fetchRedditPosts(

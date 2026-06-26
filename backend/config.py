@@ -235,6 +235,10 @@ class Settings:
     hackernews_min_comments: int = int(os.getenv("HN_MIN_COMMENTS", "1"))
     reddit_import_secret: str = os.getenv("REDDIT_IMPORT_SECRET", "")
 
+    # Microsoft Teams: Power-Automate-Workflow-Webhook ("Beim Empfang einer
+    # Webhookanforderung in einem Kanal posten"). Leer = Senden deaktiviert.
+    teams_webhook_url: str = os.getenv("TEAMS_WEBHOOK_URL", "")
+
     # Newsletter / IMAP
     newsletter_imap_host: str = os.getenv("NEWSLETTER_IMAP_HOST", "imap.gmx.net")
     newsletter_imap_port: int = int(os.getenv("NEWSLETTER_IMAP_PORT", "993"))

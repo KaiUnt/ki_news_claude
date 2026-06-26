@@ -1,5 +1,6 @@
 import logging
 import threading
+import httpx
 from datetime import datetime, date, time, timedelta, timezone
 from typing import Optional
 from dateutil import tz
@@ -474,6 +475,94 @@ def remove_favorite(story_id: int):
             session.commit()
 
     return {"ok": True, "story_id": story_id}
+
+
+# ── Teams webhook ─────────────────────────────────────────────────────────────
+
+class TeamsBlock(BaseModel):
+    kind: str                       # "story" | "heading" | "text"
+    title: Optional[str] = None     # story
+    summary: Optional[str] = None   # story
+    url: Optional[str] = None       # story
+    content: Optional[str] = None   # heading | text
+
+
+class TeamsPostBody(BaseModel):
+    header: str = ""
+    footer: str = ""
+    blocks: list[TeamsBlock] = []
+
+
+def _build_teams_card(body: TeamsPostBody) -> dict:
+    """Render the post as an Adaptive Card. Teams TextBlocks only support a
+    markdown subset (bold, links, lists) — no HTML — so we emit structured
+    elements rather than reusing the frontend's HTML builder."""
+    elements: list[dict] = []
+    if body.header.strip():
+        elements.append({"type": "TextBlock", "text": body.header, "wrap": True})
+
+    for b in body.blocks:
+        if b.kind == "story" and (b.title or "").strip():
+            elements.append({
+                "type": "TextBlock", "weight": "Bolder", "wrap": True,
+                "text": f"📌 {b.title}", "spacing": "Medium",
+            })
+            if (b.summary or "").strip():
+                elements.append({"type": "TextBlock", "text": b.summary,
+                                 "wrap": True, "isSubtle": True, "spacing": "None"})
+            if (b.url or "").strip():
+                elements.append({"type": "TextBlock", "text": f"[🔗 Link]({b.url})",
+                                 "wrap": True, "spacing": "None"})
+        elif b.kind == "heading" and (b.content or "").strip():
+            elements.append({"type": "TextBlock", "size": "Large", "weight": "Bolder",
+                             "wrap": True, "text": b.content, "spacing": "Medium"})
+        elif b.kind == "text" and (b.content or "").strip():
+            elements.append({"type": "TextBlock", "text": b.content, "wrap": True})
+
+    if body.footer.strip():
+        elements.append({"type": "TextBlock", "text": body.footer, "wrap": True,
+                         "spacing": "Medium"})
+
+    return {
+        "type": "message",
+        "attachments": [{
+            "contentType": "application/vnd.microsoft.card.adaptive",
+            "content": {
+                "type": "AdaptiveCard",
+                "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                "version": "1.4",
+                "body": elements,
+            },
+        }],
+    }
+
+
+@app.get("/api/teams/status")
+def teams_status():
+    return {"configured": bool(settings.teams_webhook_url)}
+
+
+@app.post("/api/teams/post")
+def post_to_teams(body: TeamsPostBody):
+    url = settings.teams_webhook_url
+    if not url:
+        raise HTTPException(status_code=400,
+                            detail="Teams-Webhook nicht konfiguriert (TEAMS_WEBHOOK_URL fehlt).")
+    if not any(b.kind == "story" or (b.content or "").strip() for b in body.blocks):
+        raise HTTPException(status_code=400, detail="Leerer Post — nichts zu senden.")
+
+    try:
+        resp = httpx.post(url, json=_build_teams_card(body), timeout=15)
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        logger.warning("[teams] Webhook antwortete %s: %s", e.response.status_code, e.response.text[:300])
+        raise HTTPException(status_code=502,
+                            detail=f"Teams lehnte den Post ab (HTTP {e.response.status_code}).")
+    except httpx.HTTPError as e:
+        logger.warning("[teams] Webhook-Aufruf fehlgeschlagen: %s", e)
+        raise HTTPException(status_code=502, detail="Teams-Webhook nicht erreichbar.")
+
+    return {"ok": True}
 
 
 # ── Metadata endpoints ────────────────────────────────────────────────────────

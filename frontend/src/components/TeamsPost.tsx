@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import type { FavoriteWeek, Story, Source, Filters } from '../types'
-import { fetchFavorites, fetchStories, fetchStoryDetail, addFavorite, removeFavorite, generatePost } from '../api'
+import {
+  fetchFavorites, fetchStories, fetchStoryDetail, addFavorite, removeFavorite,
+  generatePost, fetchTeamsStatus, postToTeams, type TeamsBlock,
+} from '../api'
 import { FilterBar } from './FilterBar'
 import { StoryCard } from './StoryCard'
 import { StoryDetailModal } from './StoryDetailModal'
@@ -280,6 +283,17 @@ export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
   const [aiGenerating, setAiGenerating] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
 
+  const [teamsConfigured, setTeamsConfigured] = useState(false)
+  const [sendState, setSendState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
+  const [sendError, setSendError] = useState<string | null>(null)
+
+  // Probe whether the Teams webhook is configured server-side
+  useEffect(() => {
+    fetchTeamsStatus()
+      .then(s => setTeamsConfigured(s.configured))
+      .catch(() => setTeamsConfigured(false))
+  }, [])
+
   // Load favorites on mount
   useEffect(() => {
     fetchFavorites()
@@ -551,6 +565,40 @@ export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
     }
   }
 
+  // Maps the editor blocks into the API payload, resolving story title/summary/url.
+  function buildTeamsBlocks(): TeamsBlock[] {
+    const out: TeamsBlock[] = []
+    for (const block of blocks) {
+      if (block.kind === 'story') {
+        const story = storyMap.get(block.storyId)
+        if (!story) continue
+        out.push({
+          kind: 'story',
+          title: story.primary_title || story.title_de,
+          summary: story.summary_de ?? undefined,
+          url: selectedUrls.get(block.storyId) ?? story.primary_url ?? undefined,
+        })
+      } else if (block.content.trim()) {
+        out.push({ kind: block.kind, content: block.content })
+      }
+    }
+    return out
+  }
+
+  async function handleSend() {
+    setSendState('sending')
+    setSendError(null)
+    try {
+      await postToTeams({ header, footer, blocks: buildTeamsBlocks() })
+      setSendState('sent')
+      setTimeout(() => setSendState('idle'), 3000)
+    } catch (e) {
+      setSendState('error')
+      setSendError(e instanceof Error ? e.message : 'Senden fehlgeschlagen')
+      setTimeout(() => setSendState('idle'), 5000)
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
@@ -755,6 +803,27 @@ export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
               >
                 {copied ? '✓ Kopiert!' : 'In Zwischenablage kopieren'}
               </button>
+              {/* An Teams senden Button */}
+              {teamsConfigured && (
+                <button
+                  type="button"
+                  onClick={handleSend}
+                  disabled={blocks.length === 0 || sendState === 'sending'}
+                  title={sendError ?? undefined}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                    sendState === 'sent'
+                      ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-600/40'
+                      : sendState === 'error'
+                      ? 'bg-red-600/20 text-red-400 border border-red-600/40'
+                      : 'bg-teal-600/20 text-teal-300 border border-teal-500/40 hover:bg-teal-600/30 disabled:opacity-30 disabled:cursor-not-allowed'
+                  }`}
+                >
+                  {sendState === 'sending' ? 'Sende…'
+                    : sendState === 'sent' ? '✓ Gesendet!'
+                    : sendState === 'error' ? '✕ Fehler'
+                    : 'An Teams senden'}
+                </button>
+              )}
             </div>
           </div>
           {aiError && (
