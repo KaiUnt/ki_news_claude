@@ -238,9 +238,6 @@ class Settings:
     # Microsoft Teams: Power-Automate-Workflow-Webhook ("Beim Empfang einer
     # Webhookanforderung in einem Kanal posten"). Leer = Senden deaktiviert.
     teams_webhook_url: str = os.getenv("TEAMS_WEBHOOK_URL", "")
-    # Optional: zweiter Workflow, der per "Post message in a channel" eine HTML-
-    # Nachricht (volle Breite) statt einer Adaptive Card postet. Für A/B-Test.
-    teams_webhook_url_html: str = os.getenv("TEAMS_WEBHOOK_URL_HTML", "")
     # Öffentlich (ohne Login) erreichbare URL des Ankündigungs-Headerbilds.
     # Teams lädt das Bild server-seitig — die URL muss anonym Bild-Bytes liefern.
     # Leer = Card ohne Bild (Headline als reiner Text-Fallback).

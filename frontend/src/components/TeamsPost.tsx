@@ -284,16 +284,14 @@ export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
   const [aiError, setAiError] = useState<string | null>(null)
 
   const [teamsConfigured, setTeamsConfigured] = useState(false)
-  const [teamsHtmlConfigured, setTeamsHtmlConfigured] = useState(false)
   const [sendState, setSendState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
   const [sendError, setSendError] = useState<string | null>(null)
-  const [sendFormat, setSendFormat] = useState<'card' | 'html'>('card')
 
-  // Probe whether the Teams webhook(s) are configured server-side
+  // Probe whether the Teams webhook is configured server-side
   useEffect(() => {
     fetchTeamsStatus()
-      .then(s => { setTeamsConfigured(s.configured); setTeamsHtmlConfigured(s.html_configured) })
-      .catch(() => { setTeamsConfigured(false); setTeamsHtmlConfigured(false) })
+      .then(s => setTeamsConfigured(s.configured))
+      .catch(() => setTeamsConfigured(false))
   }, [])
 
   // Load favorites on mount
@@ -587,12 +585,11 @@ export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
     return out
   }
 
-  async function handleSend(format: 'card' | 'html' = 'card') {
-    setSendFormat(format)
+  async function handleSend() {
     setSendState('sending')
     setSendError(null)
     try {
-      await postToTeams({ header, footer, blocks: buildTeamsBlocks() }, format)
+      await postToTeams({ header, footer, blocks: buildTeamsBlocks() })
       setSendState('sent')
       setTimeout(() => setSendState('idle'), 3000)
     } catch (e) {
@@ -806,46 +803,25 @@ export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
               >
                 {copied ? '✓ Kopiert!' : 'In Zwischenablage kopieren'}
               </button>
-              {/* An Teams senden Button (Card) */}
+              {/* An Teams senden Button */}
               {teamsConfigured && (
                 <button
                   type="button"
-                  onClick={() => handleSend('card')}
+                  onClick={handleSend}
                   disabled={blocks.length === 0 || sendState === 'sending'}
-                  title={sendFormat === 'card' ? (sendError ?? undefined) : undefined}
+                  title={sendError ?? undefined}
                   className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                    sendFormat === 'card' && sendState === 'sent'
+                    sendState === 'sent'
                       ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-600/40'
-                      : sendFormat === 'card' && sendState === 'error'
+                      : sendState === 'error'
                       ? 'bg-red-600/20 text-red-400 border border-red-600/40'
                       : 'bg-teal-600/20 text-teal-300 border border-teal-500/40 hover:bg-teal-600/30 disabled:opacity-30 disabled:cursor-not-allowed'
                   }`}
                 >
-                  {sendFormat === 'card' && sendState === 'sending' ? 'Sende…'
-                    : sendFormat === 'card' && sendState === 'sent' ? '✓ Gesendet!'
-                    : sendFormat === 'card' && sendState === 'error' ? '✕ Fehler'
+                  {sendState === 'sending' ? 'Sende…'
+                    : sendState === 'sent' ? '✓ Gesendet!'
+                    : sendState === 'error' ? '✕ Fehler'
                     : 'An Teams senden'}
-                </button>
-              )}
-              {/* HTML-Test Button (zweiter Flow, volle Breite) */}
-              {teamsHtmlConfigured && (
-                <button
-                  type="button"
-                  onClick={() => handleSend('html')}
-                  disabled={blocks.length === 0 || sendState === 'sending'}
-                  title={sendFormat === 'html' ? (sendError ?? 'HTML-Variante (volle Breite) — Test') : 'HTML-Variante (volle Breite) — Test'}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                    sendFormat === 'html' && sendState === 'sent'
-                      ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-600/40'
-                      : sendFormat === 'html' && sendState === 'error'
-                      ? 'bg-red-600/20 text-red-400 border border-red-600/40'
-                      : 'bg-sky-600/20 text-sky-300 border border-sky-500/40 hover:bg-sky-600/30 disabled:opacity-30 disabled:cursor-not-allowed'
-                  }`}
-                >
-                  {sendFormat === 'html' && sendState === 'sending' ? 'Sende…'
-                    : sendFormat === 'html' && sendState === 'sent' ? '✓ Gesendet!'
-                    : sendFormat === 'html' && sendState === 'error' ? '✕ Fehler'
-                    : 'HTML-Test'}
                 </button>
               )}
             </div>
