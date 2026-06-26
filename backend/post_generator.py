@@ -81,10 +81,13 @@ def generate_post(story_ids: list[int]) -> dict:
     if not stories:
         raise ValueError("Keine Stories gefunden für die gegebenen IDs.")
 
-    # Build story list for the prompt
+    # Build story list for the prompt. primary_title/primary_url are computed in
+    # app.py from the underlying articles — the Story model itself only carries
+    # the normalized German title_de/summary_de, which are exactly what Claude
+    # needs to cluster thematically.
     story_lines: list[str] = []
     for s in stories:
-        title = s.primary_title or s.title_de or "(kein Titel)"
+        title = s.title_de or "(kein Titel)"
         summary = s.summary_de or "(keine Zusammenfassung)"
         story_lines.append(f"ID {s.id}: {title}\nZusammenfassung: {summary}")
 
@@ -105,26 +108,41 @@ def generate_post(story_ids: list[int]) -> dict:
 
     response = call_with_retry(_call)
 
-    # Extract tool result
+    # Extract the forced tool result
+    raw = None
     for block in response.content:
         if block.type == "tool_use" and block.name == "publish_post":
-            result = block.input
-            # Validate that all story_ids are present in exactly one cluster
-            clustered_ids: set[int] = set()
-            for cluster in result.get("clusters", []):
-                for sid in cluster.get("story_ids", []):
-                    clustered_ids.add(sid)
+            raw = block.input
+            break
+    if raw is None:
+        raise RuntimeError("Claude hat kein gültiges Tool-Ergebnis zurückgegeben.")
 
-            # Add any missed stories to a catch-all cluster
-            missed = [sid for sid in story_ids if sid not in clustered_ids]
-            if missed:
-                logger.warning("[post_generator] %d Stories nicht geclustert, füge Sammelcluster hinzu", len(missed))
-                result["clusters"].append({
-                    "title": "Weitere Meldungen",
-                    "intro": "Weitere relevante Meldungen aus der KI-Welt.",
-                    "story_ids": missed,
-                })
+    # Sanitize: only keep IDs we actually sent, drop duplicates across clusters
+    # (each story exactly once), and drop clusters that end up empty.
+    valid_ids = {s.id for s in stories}
+    seen: set[int] = set()
+    clean_clusters: list[dict] = []
+    for cluster in raw.get("clusters", []):
+        ids: list[int] = []
+        for sid in cluster.get("story_ids", []):
+            if sid in valid_ids and sid not in seen:
+                ids.append(sid)
+                seen.add(sid)
+        if ids:
+            clean_clusters.append({
+                "title": cluster.get("title", "Weitere Meldungen"),
+                "intro": cluster.get("intro", ""),
+                "story_ids": ids,
+            })
 
-            return result
+    # Add any stories Claude forgot to a catch-all cluster
+    missed = [sid for sid in story_ids if sid in valid_ids and sid not in seen]
+    if missed:
+        logger.warning("[post_generator] %d Stories nicht geclustert, füge Sammelcluster hinzu", len(missed))
+        clean_clusters.append({
+            "title": "Weitere Meldungen",
+            "intro": "Weitere relevante Meldungen aus der KI-Welt.",
+            "story_ids": missed,
+        })
 
-    raise RuntimeError("Claude hat kein gültiges Tool-Ergebnis zurückgegeben.")
+    return {"clusters": clean_clusters}
