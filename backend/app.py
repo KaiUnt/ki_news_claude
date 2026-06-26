@@ -404,6 +404,26 @@ def list_favorites():
     return {"weeks": weeks}
 
 
+class GeneratePostRequest(BaseModel):
+    story_ids: list[int]
+
+
+@app.post("/api/favorites/generate-post")
+def generate_favorites_post(req: GeneratePostRequest):
+    if not req.story_ids:
+        raise HTTPException(status_code=400, detail="Keine Story-IDs angegeben.")
+    if len(req.story_ids) > 50:
+        raise HTTPException(status_code=400, detail="Maximal 50 Stories pro Post.")
+    try:
+        result = post_generator.generate_post(req.story_ids)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error("[generate-post] Fehler: %s", e)
+        raise HTTPException(status_code=500, detail="Fehler beim Generieren des Posts.")
+    return result
+
+
 @app.post("/api/favorites/{story_id}")
 def add_favorite(story_id: int):
     with Session(engine) as session:
@@ -454,26 +474,6 @@ def remove_favorite(story_id: int):
             session.commit()
 
     return {"ok": True, "story_id": story_id}
-
-
-class GeneratePostRequest(BaseModel):
-    story_ids: list[int]
-
-
-@app.post("/api/favorites/generate-post")
-def generate_favorites_post(req: GeneratePostRequest):
-    if not req.story_ids:
-        raise HTTPException(status_code=400, detail="Keine Story-IDs angegeben.")
-    if len(req.story_ids) > 50:
-        raise HTTPException(status_code=400, detail="Maximal 50 Stories pro Post.")
-    try:
-        result = post_generator.generate_post(req.story_ids)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        logger.error("[generate-post] Fehler: %s", e)
-        raise HTTPException(status_code=500, detail="Fehler beim Generieren des Posts.")
-    return result
 
 
 # ── Metadata endpoints ────────────────────────────────────────────────────────
