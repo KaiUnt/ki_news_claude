@@ -1,3 +1,4 @@
+import html as html_lib
 import logging
 import threading
 import httpx
@@ -491,6 +492,7 @@ class TeamsPostBody(BaseModel):
     header: str = ""
     footer: str = ""
     blocks: list[TeamsBlock] = []
+    format: str = "card"  # "card" (Adaptive Card) | "html" (volle Breite, 2. Flow)
 
 
 def _teams_headline() -> str:
@@ -571,22 +573,73 @@ def _build_teams_card(body: TeamsPostBody) -> dict:
     }
 
 
+def _build_teams_html(body: TeamsPostBody) -> str:
+    """Render the post as a Teams-message HTML string (full width, posted via a
+    'Post message in a channel' Power Automate action). Teams renders a subset:
+    img, h1/h2, b/strong, i/em, a, br, p. The headline can't overlay the image
+    in HTML, so it's a separate <h1> under the banner."""
+    def esc(s: str | None) -> str:
+        return html_lib.escape(s or "")
+
+    def multiline(s: str) -> str:
+        return esc(s).replace("\n", "<br>")
+
+    parts: list[str] = []
+    if settings.teams_header_image_url:
+        parts.append(
+            f'<img src="{esc(settings.teams_header_image_url)}" '
+            f'alt="{esc(_teams_headline())}" width="600" style="max-width:100%;">'
+        )
+    parts.append(f"<h1>{esc(_teams_headline())}</h1>")
+    if body.header.strip():
+        parts.append(f"<p>{multiline(body.header)}</p>")
+
+    for b in body.blocks:
+        if b.kind == "story" and (b.title or "").strip():
+            inner = f"<strong>📌 {esc(b.title)}</strong>"
+            if (b.summary or "").strip():
+                inner += f"<br><em>{esc(b.summary)}</em>"
+            if (b.url or "").strip():
+                inner += f'<br>🔗 <a href="{esc(b.url)}">{esc(b.url)}</a>'
+            parts.append(f"<p>{inner}</p>")
+        elif b.kind == "heading" and (b.content or "").strip():
+            parts.append(f"<h2>{esc(b.content)}</h2>")
+        elif b.kind == "text" and (b.content or "").strip():
+            parts.append(f"<p>{multiline(b.content)}</p>")
+
+    if body.footer.strip():
+        parts.append(f"<p>{multiline(body.footer)}</p>")
+    return "\n".join(parts)
+
+
 @app.get("/api/teams/status")
 def teams_status():
-    return {"configured": bool(settings.teams_webhook_url)}
+    return {
+        "configured": bool(settings.teams_webhook_url),
+        "html_configured": bool(settings.teams_webhook_url_html),
+    }
 
 
 @app.post("/api/teams/post")
 def post_to_teams(body: TeamsPostBody):
-    url = settings.teams_webhook_url
-    if not url:
-        raise HTTPException(status_code=400,
-                            detail="Teams-Webhook nicht konfiguriert (TEAMS_WEBHOOK_URL fehlt).")
     if not any(b.kind == "story" or (b.content or "").strip() for b in body.blocks):
         raise HTTPException(status_code=400, detail="Leerer Post — nichts zu senden.")
 
+    if body.format == "html":
+        url = settings.teams_webhook_url_html
+        if not url:
+            raise HTTPException(status_code=400,
+                                detail="HTML-Webhook nicht konfiguriert (TEAMS_WEBHOOK_URL_HTML fehlt).")
+        payload = {"html": _build_teams_html(body)}
+    else:
+        url = settings.teams_webhook_url
+        if not url:
+            raise HTTPException(status_code=400,
+                                detail="Teams-Webhook nicht konfiguriert (TEAMS_WEBHOOK_URL fehlt).")
+        payload = _build_teams_card(body)
+
     try:
-        resp = httpx.post(url, json=_build_teams_card(body), timeout=15)
+        resp = httpx.post(url, json=payload, timeout=15)
         resp.raise_for_status()
     except httpx.HTTPStatusError as e:
         logger.warning("[teams] Webhook antwortete %s: %s", e.response.status_code, e.response.text[:300])

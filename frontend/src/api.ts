@@ -204,17 +204,19 @@ export interface TeamsPostPayload {
   blocks: TeamsBlock[]
 }
 
-export async function fetchTeamsStatus(): Promise<{ configured: boolean }> {
+export type TeamsFormat = 'card' | 'html'
+
+export async function fetchTeamsStatus(): Promise<{ configured: boolean; html_configured: boolean }> {
   const res = await fetch(`${BASE}/teams/status`)
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.json()
 }
 
-export async function postToTeams(payload: TeamsPostPayload): Promise<void> {
+export async function postToTeams(payload: TeamsPostPayload, format: TeamsFormat = 'card'): Promise<void> {
   const res = await fetch(`${BASE}/teams/post`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ ...payload, format }),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
