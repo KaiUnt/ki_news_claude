@@ -493,13 +493,46 @@ class TeamsPostBody(BaseModel):
     blocks: list[TeamsBlock] = []
 
 
+def _teams_headline() -> str:
+    """'KI-News KW NN' für die aktuelle Kalenderwoche (lokale Zeitzone)."""
+    week = _utc_naive_to_local(datetime.utcnow()).isocalendar()[1]
+    return f"KI-News KW {week}"
+
+
 def _build_teams_card(body: TeamsPostBody) -> dict:
     """Render the post as an Adaptive Card. Teams TextBlocks only support a
     markdown subset (bold, links, lists) — no HTML — so we emit structured
     elements rather than reusing the frontend's HTML builder."""
     elements: list[dict] = []
+
+    # Ankündigungs-Header: Bild als backgroundImage (full-bleed) mit Headline
+    # links über der dunklen Fläche. Teams lädt das Bild server-seitig — die URL
+    # muss anonym erreichbar sein. Ohne Bild → Headline als reiner Text.
+    headline = _teams_headline()
+    if settings.teams_header_image_url:
+        elements.append({
+            "type": "Container",
+            "bleed": True,
+            "minHeight": "170px",
+            "verticalContentAlignment": "center",
+            "backgroundImage": {
+                "url": settings.teams_header_image_url,
+                "fillMode": "cover",
+                "verticalAlignment": "center",
+            },
+            "items": [{
+                "type": "TextBlock", "text": headline, "wrap": True,
+                "size": "ExtraLarge", "weight": "Bolder", "color": "Light",
+            }],
+        })
+    else:
+        elements.append({
+            "type": "TextBlock", "text": headline, "wrap": True,
+            "size": "ExtraLarge", "weight": "Bolder",
+        })
+
     if body.header.strip():
-        elements.append({"type": "TextBlock", "text": body.header, "wrap": True})
+        elements.append({"type": "TextBlock", "text": body.header, "wrap": True, "spacing": "Medium"})
 
     for b in body.blocks:
         if b.kind == "story" and (b.title or "").strip():
