@@ -240,8 +240,12 @@ class Settings:
     teams_webhook_url: str = os.getenv("TEAMS_WEBHOOK_URL", "")
     # Öffentlich (ohne Login) erreichbare URL des Ankündigungs-Headerbilds.
     # Teams lädt das Bild server-seitig — die URL muss anonym Bild-Bytes liefern.
-    # Leer = Card ohne Bild (Headline als reiner Text-Fallback).
-    teams_header_image_url: str = os.getenv("TEAMS_HEADER_IMAGE_URL", "")
+    # Kein Secret → kanonischer Default hier; TEAMS_HEADER_IMAGE_URL überschreibt
+    # bei Bedarf, "" als Override = Card ohne Bild (Headline als Text-Fallback).
+    teams_header_image_url: str = os.getenv(
+        "TEAMS_HEADER_IMAGE_URL",
+        "https://www.world-direct.at/fileadmin/user_upload/KI_Wochenschau_TEAMS_header.png",
+    )
 
     # Newsletter / IMAP
     newsletter_imap_host: str = os.getenv("NEWSLETTER_IMAP_HOST", "imap.gmx.net")

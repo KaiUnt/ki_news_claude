@@ -50,19 +50,30 @@ function mondayOf(date: Date): Date {
 }
 
 // Auswahl der letzten Wochen: aktuelle KW + 7 zurück (z.B. am Montag die Vorwoche posten)
-function buildWeekOptions(): { week: number; label: string }[] {
+function buildWeekOptions(): { week: number; label: string; start: Date; end: Date }[] {
   const fmt = (d: Date) =>
     `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.`
   const thisMonday = mondayOf(new Date())
-  const opts: { week: number; label: string }[] = []
+  const opts: { week: number; label: string; start: Date; end: Date }[] = []
   for (let i = 0; i < 8; i++) {
     const monday = new Date(thisMonday)
     monday.setDate(monday.getDate() - i * 7)
     const sunday = new Date(monday)
     sunday.setDate(sunday.getDate() + 6)
-    opts.push({ week: isoWeek(monday), label: `KW ${isoWeek(monday)} (${fmt(monday)}–${fmt(sunday)})` })
+    opts.push({ week: isoWeek(monday), label: `KW ${isoWeek(monday)} (${fmt(monday)}–${fmt(sunday)})`, start: monday, end: sunday })
   }
   return opts
+}
+
+// Spiegelt die Backend-Headline (_teams_headline in app.py): "KI-Wochenschau 🤖 23.–29. Juni"
+const MONTHS_DE = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
+  'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember']
+
+function teamsHeadline(start: Date, end: Date): string {
+  const range = start.getMonth() === end.getMonth()
+    ? `${start.getDate()}.–${end.getDate()}. ${MONTHS_DE[start.getMonth()]}`
+    : `${start.getDate()}. ${MONTHS_DE[start.getMonth()]}–${end.getDate()}. ${MONTHS_DE[end.getMonth()]}`
+  return `KI-Wochenschau 🤖 ${range}`
 }
 
 function ExternalLinkButton({ url }: { url?: string }) {
@@ -338,6 +349,10 @@ export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
   const [footer, setFooter] = useState('Viel Spaß beim Lesen! 🤖')
   const weekOptions = useMemo(() => buildWeekOptions(), [])
   const [selectedWeek, setSelectedWeek] = useState<number>(() => isoWeek(new Date()))
+  const selectedHeadline = useMemo(() => {
+    const o = weekOptions.find(o => o.week === selectedWeek) ?? weekOptions[0]
+    return o ? teamsHeadline(o.start, o.end) : `KI-Wochenschau 🤖 KW ${selectedWeek}`
+  }, [weekOptions, selectedWeek])
   const [headerOpen, setHeaderOpen] = useState(false)
   const [footerOpen, setFooterOpen] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -908,7 +923,7 @@ export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
         {/* Scrollable content */}
         <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pb-4">
 
-        {/* Kalenderwoche — bestimmt die Überschrift "KI-News KW NN" der Teams-Card */}
+        {/* Kalenderwoche — bestimmt die Überschrift "KI-Wochenschau 🤖 <Datumsbereich>" der Teams-Card */}
         <div className="flex items-center gap-2 px-3 py-2 border border-slate-700 rounded-lg">
           <span className="text-xs text-slate-500 shrink-0">📅 Kalenderwoche</span>
           <select
@@ -1032,7 +1047,7 @@ export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
           <div className="mt-4">
             <p className="text-xs text-slate-500 mb-1.5">Vorschau</p>
             <div className="bg-slate-800/60 border border-slate-700 rounded-lg p-4 space-y-3 text-sm">
-              <p className="font-bold text-slate-100">KI-News KW {selectedWeek}</p>
+              <p className="font-bold text-slate-100">{selectedHeadline}</p>
               {header.trim() && <p className="text-slate-300 whitespace-pre-wrap">{header}</p>}
               {blocks.map((block, i) => {
                 if (block.kind === 'story') {
