@@ -491,11 +491,14 @@ class TeamsPostBody(BaseModel):
     header: str = ""
     footer: str = ""
     blocks: list[TeamsBlock] = []
+    week: Optional[int] = None       # explizit gewählte Kalenderwoche; None → aktuelle
 
 
-def _teams_headline() -> str:
-    """'KI-News KW NN' für die aktuelle Kalenderwoche (lokale Zeitzone)."""
-    week = _utc_naive_to_local(datetime.utcnow()).isocalendar()[1]
+def _teams_headline(week: Optional[int] = None) -> str:
+    """'KI-News KW NN'. Nimmt die übergebene KW, sonst die aktuelle Kalenderwoche
+    (lokale Zeitzone) — wichtig, wenn man am Montag die News der Vorwoche postet."""
+    if week is None:
+        week = _utc_naive_to_local(datetime.utcnow()).isocalendar()[1]
     return f"KI-News KW {week}"
 
 
@@ -508,7 +511,7 @@ def _build_teams_card(body: TeamsPostBody) -> dict:
     # Ankündigungs-Header: Bild als backgroundImage (full-bleed) mit Headline
     # links über der dunklen Fläche. Teams lädt das Bild server-seitig — die URL
     # muss anonym erreichbar sein. Ohne Bild → Headline als reiner Text.
-    headline = _teams_headline()
+    headline = _teams_headline(body.week)
     if settings.teams_header_image_url:
         elements.append({
             "type": "Container",

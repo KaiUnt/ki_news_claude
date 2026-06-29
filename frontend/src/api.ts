@@ -202,6 +202,7 @@ export interface TeamsPostPayload {
   header: string
   footer: string
   blocks: TeamsBlock[]
+  week?: number
 }
 
 export async function fetchTeamsStatus(): Promise<{ configured: boolean }> {

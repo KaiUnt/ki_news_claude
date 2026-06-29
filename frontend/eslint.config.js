@@ -18,5 +18,10 @@ export default defineConfig([
     languageOptions: {
       globals: globals.browser,
     },
+    rules: {
+      // Das verbreitete Daten-Lade-Muster (setLoading(true) + fetch().finally(setLoading(false)))
+      // triggert diese neue React-19-Regel, ist hier aber Absicht und kein Bug → nur Warnung.
+      'react-hooks/set-state-in-effect': 'warn',
+    },
   },
 ])

@@ -31,6 +31,58 @@ function makeId() {
   return `t-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 }
 
+// ISO-8601 Kalenderwoche (Woche mit dem ersten Donnerstag des Jahres = KW 1)
+function isoWeek(date: Date): number {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
+  const dayNum = (d.getUTCDay() + 6) % 7 // Mo=0 … So=6
+  d.setUTCDate(d.getUTCDate() - dayNum + 3) // auf den Donnerstag dieser Woche
+  const firstThursday = new Date(Date.UTC(d.getUTCFullYear(), 0, 4))
+  const ftDay = (firstThursday.getUTCDay() + 6) % 7
+  firstThursday.setUTCDate(firstThursday.getUTCDate() - ftDay + 3)
+  return 1 + Math.round((d.getTime() - firstThursday.getTime()) / 604800000)
+}
+
+function mondayOf(date: Date): Date {
+  const d = new Date(date)
+  d.setHours(0, 0, 0, 0)
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
+  return d
+}
+
+// Auswahl der letzten Wochen: aktuelle KW + 7 zurück (z.B. am Montag die Vorwoche posten)
+function buildWeekOptions(): { week: number; label: string }[] {
+  const fmt = (d: Date) =>
+    `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.`
+  const thisMonday = mondayOf(new Date())
+  const opts: { week: number; label: string }[] = []
+  for (let i = 0; i < 8; i++) {
+    const monday = new Date(thisMonday)
+    monday.setDate(monday.getDate() - i * 7)
+    const sunday = new Date(monday)
+    sunday.setDate(sunday.getDate() + 6)
+    opts.push({ week: isoWeek(monday), label: `KW ${isoWeek(monday)} (${fmt(monday)}–${fmt(sunday)})` })
+  }
+  return opts
+}
+
+function ExternalLinkButton({ url }: { url?: string }) {
+  if (!url) return null
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      title="Seite in neuem Tab öffnen (z.B. Paywall prüfen)"
+      onClick={e => e.stopPropagation()}
+      className="shrink-0 flex items-center justify-center w-7 h-7 rounded border border-slate-700 bg-slate-900 text-slate-400 hover:text-indigo-300 hover:border-indigo-500 transition-colors"
+    >
+      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+      </svg>
+    </a>
+  )
+}
+
 function blockId(block: ContentBlock): string {
   return block.kind === 'story' ? `story-${block.storyId}` : block.id
 }
@@ -154,6 +206,7 @@ function StoryBlock({
   onRemove: () => void
 }) {
   const title = story?.primary_title || story?.title_de || `Story #${block.storyId}`
+  const effectiveUrl = selectedUrl ?? story?.primary_url ?? sources?.[0]?.url
   return (
     <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-3 space-y-2">
       <div className="flex items-start gap-2">
@@ -172,21 +225,27 @@ function StoryBlock({
           <span className="text-xs text-slate-500">Quellen werden geladen…</span>
         </div>
       ) : sources && sources.length > 0 ? (
-        <select
-          value={selectedUrl ?? ''}
-          onChange={e => onSelectUrl(e.target.value)}
-          className="w-full text-xs bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-slate-300 focus:outline-none focus:border-indigo-500"
-        >
-          {sources.map(src => (
-            <option key={src.url} value={src.url}>
-              {src.source_name} — {src.url.length > 55 ? src.url.slice(0, 55) + '…' : src.url}
-            </option>
-          ))}
-        </select>
+        <div className="flex items-center gap-1.5">
+          <select
+            value={selectedUrl ?? ''}
+            onChange={e => onSelectUrl(e.target.value)}
+            className="flex-1 min-w-0 text-xs bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-slate-300 focus:outline-none focus:border-indigo-500"
+          >
+            {sources.map(src => (
+              <option key={src.url} value={src.url}>
+                {src.source_name} — {src.url.length > 55 ? src.url.slice(0, 55) + '…' : src.url}
+              </option>
+            ))}
+          </select>
+          <ExternalLinkButton url={effectiveUrl} />
+        </div>
       ) : (
-        <p className="text-xs text-slate-600 pl-5 truncate">
-          {selectedUrl ?? story?.primary_url ?? 'Kein Link verfügbar'}
-        </p>
+        <div className="flex items-center gap-1.5 pl-5">
+          <p className="flex-1 min-w-0 text-xs text-slate-600 truncate">
+            {effectiveUrl ?? 'Kein Link verfügbar'}
+          </p>
+          <ExternalLinkButton url={effectiveUrl} />
+        </div>
       )}
     </div>
   )
@@ -275,8 +334,10 @@ export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
 
   const [editorOpen, setEditorOpen] = useState(false)
 
-  const [header, setHeader] = useState('Hallo Kollegen,\n\nhier wieder die brandaktuellen News zum Thema KI:')
+  const [header, setHeader] = useState('')
   const [footer, setFooter] = useState('Viel Spaß beim Lesen! 🤖')
+  const weekOptions = useMemo(() => buildWeekOptions(), [])
+  const [selectedWeek, setSelectedWeek] = useState<number>(() => isoWeek(new Date()))
   const [headerOpen, setHeaderOpen] = useState(false)
   const [footerOpen, setFooterOpen] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -312,11 +373,13 @@ export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
   }, [])
 
   // Load "Weitere Artikel" with debounce, using shared filters
+  const tagsKey = filters.tags.join(',')
+  const sourcesKey = filters.sources.join(',')
   useEffect(() => {
     if (!moreOpen) return
-    setMoreLoading(true)
     const controller = new AbortController()
     const timer = setTimeout(() => {
+      setMoreLoading(true)
       fetchStories(filters, 0, 40, controller.signal)
         .then(data => {
           setMoreStories(data.items.filter(s => !s.is_favorite))
@@ -331,7 +394,10 @@ export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
         .finally(() => setMoreLoading(false))
     }, 400)
     return () => { clearTimeout(timer); controller.abort() }
-  }, [moreOpen, filters.search, filters.tags.join(','), filters.sort, filters.dateFrom, filters.dateTo, filters.sources.join(',')])
+    // filters wird absichtlich über die granularen Keys getrackt (Objekt-Identität
+    // ändert sich pro Render); deshalb hier bewusst aus den Deps ausgeklammert.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [moreOpen, filters.search, tagsKey, filters.sort, filters.dateFrom, filters.dateTo, sourcesKey])
 
   const filteredWeeks = useMemo(() => {
     const s = filters.search.toLowerCase()
@@ -435,8 +501,13 @@ export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
   function buildTeamsHtml(): string {
     // Teams strips CSS margins — use explicit <br> for spacing.
     // Rule: blank line between blocks UNLESS the previous block was a heading.
-    let html = `<p>${esc(header).replace(/\n/g, '<br>')}</p>`
-    let prevKind = 'header'
+    // 'heading' als Start-Zustand unterdrückt ein führendes <br>, falls kein Header.
+    let html = ''
+    let prevKind = 'heading'
+    if (header.trim()) {
+      html = `<p>${esc(header).replace(/\n/g, '<br>')}</p>`
+      prevKind = 'header'
+    }
 
     for (const block of blocks) {
       let section = ''
@@ -460,12 +531,15 @@ export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
         prevKind = block.kind
       }
     }
-    html += (prevKind === 'heading' ? '' : '<br>') + `<p>${esc(footer).replace(/\n/g, '<br>')}</p>`
+    if (footer.trim()) {
+      html += (prevKind === 'heading' ? '' : '<br>') + `<p>${esc(footer).replace(/\n/g, '<br>')}</p>`
+    }
     return `<html><body>${html}</body></html>`
   }
 
   function buildTeamsText(): string {
-    const parts: string[] = [header]
+    const parts: string[] = []
+    if (header.trim()) parts.push(header)
     for (const block of blocks) {
       if (block.kind === 'story') {
         const story = storyMap.get(block.storyId)
@@ -481,7 +555,7 @@ export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
         parts.push(block.content)
       }
     }
-    parts.push(footer)
+    if (footer.trim()) parts.push(footer)
     return parts.join('\n\n')
   }
 
@@ -589,7 +663,7 @@ export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
     setSendState('sending')
     setSendError(null)
     try {
-      await postToTeams({ header, footer, blocks: buildTeamsBlocks() })
+      await postToTeams({ header, footer, blocks: buildTeamsBlocks(), week: selectedWeek })
       setSendState('sent')
       setTimeout(() => setSendState('idle'), 3000)
     } catch (e) {
@@ -834,6 +908,20 @@ export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
         {/* Scrollable content */}
         <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pb-4">
 
+        {/* Kalenderwoche — bestimmt die Überschrift "KI-News KW NN" der Teams-Card */}
+        <div className="flex items-center gap-2 px-3 py-2 border border-slate-700 rounded-lg">
+          <span className="text-xs text-slate-500 shrink-0">📅 Kalenderwoche</span>
+          <select
+            value={selectedWeek}
+            onChange={e => setSelectedWeek(Number(e.target.value))}
+            className="flex-1 min-w-0 text-xs bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-slate-300 focus:outline-none focus:border-indigo-500"
+          >
+            {weekOptions.map(opt => (
+              <option key={opt.week} value={opt.week}>{opt.label}</option>
+            ))}
+          </select>
+        </div>
+
         {/* Header collapsible */}
         <div className="border border-slate-700 rounded-lg overflow-hidden">
           <button
@@ -842,7 +930,7 @@ export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
             className="flex items-center gap-2 w-full px-3 py-2 text-left hover:bg-slate-800/50 transition-colors"
           >
             <span className={`text-[10px] text-slate-500 transition-transform duration-150 ${headerOpen ? 'rotate-90' : ''}`}>▶</span>
-            <span className="text-xs text-slate-500 flex-1 truncate">{header.split('\n')[0]}</span>
+            <span className="text-xs text-slate-500 flex-1 truncate">{header.split('\n')[0] || 'kein Einstiegstext'}</span>
             <span className="text-xs text-slate-600">Einleitung</span>
           </button>
           {headerOpen && (
@@ -944,7 +1032,8 @@ export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
           <div className="mt-4">
             <p className="text-xs text-slate-500 mb-1.5">Vorschau</p>
             <div className="bg-slate-800/60 border border-slate-700 rounded-lg p-4 space-y-3 text-sm">
-              <p className="text-slate-300 whitespace-pre-wrap">{header}</p>
+              <p className="font-bold text-slate-100">KI-News KW {selectedWeek}</p>
+              {header.trim() && <p className="text-slate-300 whitespace-pre-wrap">{header}</p>}
               {blocks.map((block, i) => {
                 if (block.kind === 'story') {
                   const story = storyMap.get(block.storyId)
@@ -966,7 +1055,7 @@ export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
                 }
                 return null
               })}
-              <p className="text-slate-300 whitespace-pre-wrap">{footer}</p>
+              {footer.trim() && <p className="text-slate-300 whitespace-pre-wrap">{footer}</p>}
             </div>
           </div>
         )}
