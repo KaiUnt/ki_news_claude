@@ -65,15 +65,15 @@ function buildWeekOptions(): { week: number; label: string; start: Date; end: Da
   return opts
 }
 
-// Spiegelt die Backend-Headline (_teams_headline in app.py): "KI-Wochenschau 🤖 23.–29. Juni"
+// Spiegelt die Backend-Headline (_teams_headline in app.py): "KI-Wochenschau <|°_°|> Juni 12-19"
 const MONTHS_DE = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
   'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember']
 
 function teamsHeadline(start: Date, end: Date): string {
   const range = start.getMonth() === end.getMonth()
-    ? `${start.getDate()}.–${end.getDate()}. ${MONTHS_DE[start.getMonth()]}`
-    : `${start.getDate()}. ${MONTHS_DE[start.getMonth()]}–${end.getDate()}. ${MONTHS_DE[end.getMonth()]}`
-  return `KI-Wochenschau 🤖 ${range}`
+    ? `${MONTHS_DE[start.getMonth()]} ${start.getDate()}-${end.getDate()}`
+    : `${MONTHS_DE[start.getMonth()]} ${start.getDate()} - ${MONTHS_DE[end.getMonth()]} ${end.getDate()}`
+  return `KI-Wochenschau <|°_°|> ${range}`
 }
 
 function ExternalLinkButton({ url }: { url?: string }) {
@@ -351,7 +351,7 @@ export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
   const [selectedWeek, setSelectedWeek] = useState<number>(() => isoWeek(new Date()))
   const selectedHeadline = useMemo(() => {
     const o = weekOptions.find(o => o.week === selectedWeek) ?? weekOptions[0]
-    return o ? teamsHeadline(o.start, o.end) : `KI-Wochenschau 🤖 KW ${selectedWeek}`
+    return o ? teamsHeadline(o.start, o.end) : `KI-Wochenschau <|°_°|> KW ${selectedWeek}`
   }, [weekOptions, selectedWeek])
   const [headerOpen, setHeaderOpen] = useState(false)
   const [footerOpen, setFooterOpen] = useState(false)
@@ -923,7 +923,7 @@ export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
         {/* Scrollable content */}
         <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pb-4">
 
-        {/* Kalenderwoche — bestimmt die Überschrift "KI-Wochenschau 🤖 <Datumsbereich>" der Teams-Card */}
+        {/* Kalenderwoche — bestimmt die Überschrift "KI-Wochenschau <|°_°|> <Datumsbereich>" der Teams-Card */}
         <div className="flex items-center gap-2 px-3 py-2 border border-slate-700 rounded-lg">
           <span className="text-xs text-slate-500 shrink-0">📅 Kalenderwoche</span>
           <select

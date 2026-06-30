@@ -502,15 +502,15 @@ _MONTHS_DE = [
 
 
 def _format_date_range_de(start: date, end: date) -> str:
-    """'23.–29. Juni' bei gleichem Monat, sonst '29. Juni–5. Juli'."""
+    """'Juni 12-19' bei gleichem Monat, sonst 'Juni 30 - Juli 6'."""
     if start.month == end.month:
-        return f"{start.day}.–{end.day}. {_MONTHS_DE[start.month - 1]}"
-    return (f"{start.day}. {_MONTHS_DE[start.month - 1]}"
-            f"–{end.day}. {_MONTHS_DE[end.month - 1]}")
+        return f"{_MONTHS_DE[start.month - 1]} {start.day}-{end.day}"
+    return (f"{_MONTHS_DE[start.month - 1]} {start.day} - "
+            f"{_MONTHS_DE[end.month - 1]} {end.day}")
 
 
 def _teams_headline(week: Optional[int] = None) -> str:
-    """'KI-Wochenschau 🤖 23.–29. Juni' — Datum = Mo–So-Bereich der gewählten KW
+    """'KI-Wochenschau <|°_°|> Juni 12-19' — Datum = Mo–So-Bereich der gewählten KW
     (oder der aktuellen Kalenderwoche, lokale Zeitzone). Wichtig, wenn man am
     Montag die News der Vorwoche postet: die übergebene KW gewinnt."""
     iso_year, iso_week, _ = _utc_naive_to_local(datetime.utcnow()).isocalendar()
@@ -521,9 +521,9 @@ def _teams_headline(week: Optional[int] = None) -> str:
         # gehört sie noch ins Vorjahr (Jahreswechsel: KW 52 im frühen Januar).
         year = iso_year - 1 if week > iso_week + 1 else iso_year
         monday = date.fromisocalendar(year, week, 1)
-        return f"KI-Wochenschau 🤖 {_format_date_range_de(monday, monday + timedelta(days=6))}"
+        return f"KI-Wochenschau <|°_°|> {_format_date_range_de(monday, monday + timedelta(days=6))}"
     except ValueError:
-        return f"KI-Wochenschau 🤖 KW {week}"
+        return f"KI-Wochenschau <|°_°|> KW {week}"
 
 
 def _build_teams_card(body: TeamsPostBody) -> dict:
