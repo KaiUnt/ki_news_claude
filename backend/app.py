@@ -3,6 +3,7 @@ import threading
 import httpx
 from datetime import datetime, date, time, timedelta, timezone
 from typing import Optional
+from urllib.parse import urlparse
 from dateutil import tz
 from fastapi import FastAPI, Query, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -363,6 +364,60 @@ def get_story(story_id: int):
         include_sources=True,
         is_favorite=is_favorite,
     )
+
+
+class AddSourceBody(BaseModel):
+    url: str
+    title: Optional[str] = None
+    source_name: Optional[str] = None
+
+
+@app.post("/api/stories/{story_id}/sources")
+def add_story_source(story_id: int, body: AddSourceBody):
+    """Manuell eine Quelle (Article) zu einer Story hinzufügen.
+
+    Mindestens die URL ist nötig; Titel und Quellenname werden sonst aus der
+    Domain abgeleitet. source_type="manual" markiert die Quelle als händisch
+    ergänzt (kein raw_content → wird nie zum primary/Headline-Artikel)."""
+    url = (body.url or "").strip()
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise HTTPException(status_code=400, detail="Ungültige URL — http(s)://… erwartet.")
+
+    host = parsed.netloc[4:] if parsed.netloc.startswith("www.") else parsed.netloc
+    source_name = (body.source_name or "").strip() or host
+    title = (body.title or "").strip() or host
+
+    with Session(engine) as session:
+        story = session.get(Story, story_id)
+        if not story:
+            raise HTTPException(status_code=404, detail="Story not found")
+
+        existing = session.exec(select(Article).where(Article.url == url)).first()
+        if existing is not None:
+            detail = ("Diese URL ist bereits eine Quelle dieser Story."
+                      if existing.story_id == story_id
+                      else "Diese URL gehört bereits zu einer anderen Story.")
+            raise HTTPException(status_code=409, detail=detail)
+
+        article = Article(
+            url=url,
+            title=title,
+            source_name=source_name,
+            source_type="manual",
+            published_at=None,
+            story_id=story_id,
+        )
+        session.add(article)
+        story.source_count += 1
+        session.add(story)
+        try:
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+            raise HTTPException(status_code=409, detail="Diese URL existiert bereits.")
+        session.refresh(article)
+        return _source_to_dict(article)
 
 
 @app.get("/api/favorites")

@@ -1,5 +1,5 @@
 import type {
-  StoriesResponse, StoryDetail, SourceConfig, Filters,
+  StoriesResponse, StoryDetail, Source, SourceConfig, Filters,
   DigestLatest, DigestSummary, UserProfile, FavoritesResponse, Story,
   StoryKind, RedditPostsResponse, RedditSubredditStats, ManagedSource, SystemSettings,
   Category, PromptSetting,
@@ -39,6 +39,26 @@ export async function fetchStories(
 export async function fetchStoryDetail(id: number): Promise<StoryDetail> {
   const res = await fetch(`${BASE}/stories/${id}`)
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
+export interface AddSourceInput {
+  url: string
+  title?: string
+  source_name?: string
+}
+
+// Fügt eine Quelle (Article) manuell zu einer Story hinzu; liefert die neue Quelle.
+export async function addStorySource(storyId: number, input: AddSourceInput): Promise<Source> {
+  const res = await fetch(`${BASE}/stories/${storyId}/sources`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail ?? `HTTP ${res.status}`)
+  }
   return res.json()
 }
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { fetchStoryDetail } from '../api'
+import { fetchStoryDetail, addStorySource } from '../api'
 import type { StoryDetail } from '../types'
 import { TagBadge } from './TagBadge'
 
@@ -9,13 +9,23 @@ interface Props {
 }
 
 function sourceIcon(type: string) {
-  return type === 'hackernews' ? '🔶' : '📰'
+  if (type === 'hackernews') return '🔶'
+  if (type === 'manual') return '🔗'
+  return '📰'
 }
 
 export function StoryDetailModal({ storyId, onClose }: Props) {
   const [detail, setDetail]   = useState<StoryDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState<string | null>(null)
+
+  // Manuelle Quelle hinzufügen
+  const [addOpen, setAddOpen]   = useState(false)
+  const [newUrl, setNewUrl]     = useState('')
+  const [newTitle, setNewTitle] = useState('')
+  const [newName, setNewName]   = useState('')
+  const [adding, setAdding]     = useState(false)
+  const [addError, setAddError] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -24,6 +34,9 @@ export function StoryDetailModal({ storyId, onClose }: Props) {
       setLoading(true)
       setError(null)
       setDetail(null)
+      setAddOpen(false)
+      setNewUrl(''); setNewTitle(''); setNewName('')
+      setAddError(null)
       fetchStoryDetail(storyId)
         .then(data => {
           if (active) setDetail(data)
@@ -52,6 +65,28 @@ export function StoryDetailModal({ storyId, onClose }: Props) {
       document.body.style.overflow = prevOverflow
     }
   }, [onClose])
+
+  async function handleAddSource(e: React.FormEvent) {
+    e.preventDefault()
+    const url = newUrl.trim()
+    if (!url || adding) return
+    setAdding(true)
+    setAddError(null)
+    try {
+      const source = await addStorySource(storyId, {
+        url,
+        title: newTitle.trim() || undefined,
+        source_name: newName.trim() || undefined,
+      })
+      setDetail(prev => prev ? { ...prev, sources: [...prev.sources, source] } : prev)
+      setNewUrl(''); setNewTitle(''); setNewName('')
+      setAddOpen(false)
+    } catch (err) {
+      setAddError(err instanceof Error ? err.message : 'Hinzufügen fehlgeschlagen')
+    } finally {
+      setAdding(false)
+    }
+  }
 
   return (
     <div
@@ -146,6 +181,61 @@ export function StoryDetailModal({ storyId, onClose }: Props) {
                   </li>
                 ))}
               </ul>
+
+              {addOpen ? (
+                <form onSubmit={handleAddSource} className="mt-1 flex flex-col gap-2 rounded-lg border border-slate-700 bg-slate-800/40 p-3">
+                  <input
+                    type="url"
+                    required
+                    autoFocus
+                    value={newUrl}
+                    onChange={e => setNewUrl(e.target.value)}
+                    placeholder="https://… (Quell-URL)"
+                    className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500"
+                  />
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newTitle}
+                      onChange={e => setNewTitle(e.target.value)}
+                      placeholder="Titel (optional)"
+                      className="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500"
+                    />
+                    <input
+                      type="text"
+                      value={newName}
+                      onChange={e => setNewName(e.target.value)}
+                      placeholder="Quelle (optional)"
+                      className="w-32 shrink-0 bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  {addError && <p className="text-xs text-red-400 m-0">{addError}</p>}
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => { setAddOpen(false); setAddError(null) }}
+                      className="text-xs text-slate-400 hover:text-slate-200 px-2 py-1"
+                    >
+                      Abbrechen
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={!newUrl.trim() || adding}
+                      className="text-xs font-medium px-3 py-1.5 rounded-lg bg-indigo-600/20 text-indigo-300 border border-indigo-500/40 hover:bg-indigo-600/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                    >
+                      {adding ? 'Wird hinzugefügt…' : 'Hinzufügen'}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setAddOpen(true)}
+                  className="self-start text-xs text-slate-500 hover:text-indigo-300 transition-colors px-2 py-1 -mx-2 rounded hover:bg-slate-800/60"
+                >
+                  + Quelle hinzufügen
+                </button>
+              )}
             </div>
           </div>
         )}
