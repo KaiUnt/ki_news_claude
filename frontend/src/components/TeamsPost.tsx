@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import type { FavoriteWeek, Story, Source, Filters } from '../types'
 import {
   fetchFavorites, fetchStories, fetchStoryDetail, addFavorite, removeFavorite,
-  generatePost, fetchTeamsStatus, postToTeams, type TeamsBlock,
+  generatePost, fetchTeamsStatus, postToTeams, type TeamsBlock, type TeamsTarget,
 } from '../api'
 import { FilterBar } from './FilterBar'
 import { StoryCard } from './StoryCard'
@@ -359,15 +359,19 @@ export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
   const [aiGenerating, setAiGenerating] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
 
-  const [teamsConfigured, setTeamsConfigured] = useState(false)
+  const [teamsTargets, setTeamsTargets] = useState<TeamsTarget[]>([])
+  const [selectedTarget, setSelectedTarget] = useState<string>('')
   const [sendState, setSendState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
   const [sendError, setSendError] = useState<string | null>(null)
 
-  // Probe whether the Teams webhook is configured server-side
+  // Probe which Teams channels are configured server-side; preselect the default
   useEffect(() => {
     fetchTeamsStatus()
-      .then(s => setTeamsConfigured(s.configured))
-      .catch(() => setTeamsConfigured(false))
+      .then(s => {
+        setTeamsTargets(s.targets)
+        setSelectedTarget(s.default ?? s.targets[0]?.key ?? '')
+      })
+      .catch(() => setTeamsTargets([]))
   }, [])
 
   // Load favorites on mount
@@ -678,7 +682,7 @@ export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
     setSendState('sending')
     setSendError(null)
     try {
-      await postToTeams({ header, footer, blocks: buildTeamsBlocks(), week: selectedWeek })
+      await postToTeams({ header, footer, blocks: buildTeamsBlocks(), week: selectedWeek, target: selectedTarget || undefined })
       setSendState('sent')
       setTimeout(() => setSendState('idle'), 3000)
     } catch (e) {
@@ -854,7 +858,7 @@ export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
                 ? 'Noch keine Artikel ausgewählt'
                 : `${selectedStoryIds.length} Artikel ausgewählt`}
             </span>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
               {/* KI-Bericht Button */}
               <button
                 type="button"
@@ -892,26 +896,41 @@ export function TeamsPost({ onToggleFavorite }: TeamsPostProps = {}) {
               >
                 {copied ? '✓ Kopiert!' : 'In Zwischenablage kopieren'}
               </button>
-              {/* An Teams senden Button */}
-              {teamsConfigured && (
-                <button
-                  type="button"
-                  onClick={handleSend}
-                  disabled={blocks.length === 0 || sendState === 'sending'}
-                  title={sendError ?? undefined}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                    sendState === 'sent'
-                      ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-600/40'
-                      : sendState === 'error'
-                      ? 'bg-red-600/20 text-red-400 border border-red-600/40'
-                      : 'bg-teal-600/20 text-teal-300 border border-teal-500/40 hover:bg-teal-600/30 disabled:opacity-30 disabled:cursor-not-allowed'
-                  }`}
-                >
-                  {sendState === 'sending' ? 'Sende…'
-                    : sendState === 'sent' ? '✓ Gesendet!'
-                    : sendState === 'error' ? '✕ Fehler'
-                    : 'An Teams senden'}
-                </button>
+              {/* An Teams senden: Ziel-Team-Auswahl + Button */}
+              {teamsTargets.length > 0 && (
+                <div className="flex items-center gap-1.5">
+                  {teamsTargets.length > 1 && (
+                    <select
+                      value={selectedTarget}
+                      onChange={e => setSelectedTarget(e.target.value)}
+                      disabled={sendState === 'sending'}
+                      title="An welches Team senden?"
+                      className="max-w-[160px] text-xs bg-slate-900 border border-teal-500/40 rounded px-2 py-1.5 text-teal-200 focus:outline-none focus:border-teal-500 disabled:opacity-30"
+                    >
+                      {teamsTargets.map(t => (
+                        <option key={t.key} value={t.key}>{t.label}</option>
+                      ))}
+                    </select>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleSend}
+                    disabled={blocks.length === 0 || sendState === 'sending'}
+                    title={sendError ?? undefined}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                      sendState === 'sent'
+                        ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-600/40'
+                        : sendState === 'error'
+                        ? 'bg-red-600/20 text-red-400 border border-red-600/40'
+                        : 'bg-teal-600/20 text-teal-300 border border-teal-500/40 hover:bg-teal-600/30 disabled:opacity-30 disabled:cursor-not-allowed'
+                    }`}
+                  >
+                    {sendState === 'sending' ? 'Sende…'
+                      : sendState === 'sent' ? '✓ Gesendet!'
+                      : sendState === 'error' ? '✕ Fehler'
+                      : 'An Teams senden'}
+                  </button>
+                </div>
               )}
             </div>
           </div>

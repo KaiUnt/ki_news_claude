@@ -15,7 +15,7 @@ from .db import (
     create_db_and_tables, engine,
 )
 from . import digest_generator, pipeline, post_generator
-from .config import STORY_TYPES, STORY_DOMAINS, STORY_FLAGS, normalize_tags, settings, RSS_FEEDS, NEWSLETTER_SOURCES
+from .config import STORY_TYPES, STORY_DOMAINS, STORY_FLAGS, normalize_tags, settings, RSS_FEEDS, NEWSLETTER_SOURCES, TEAMS_TARGETS
 from .source_catalog import list_source_configs, story_signals_for_source_names, PAPER_SOURCES
 
 logger = logging.getLogger(__name__)
@@ -492,6 +492,7 @@ class TeamsPostBody(BaseModel):
     footer: str = ""
     blocks: list[TeamsBlock] = []
     week: Optional[int] = None       # explizit gewählte Kalenderwoche; None → aktuelle
+    target: Optional[str] = None     # key aus TEAMS_TARGETS; None → Default-Ziel
 
 
 # Deutsche Monatsnamen für den Datums-Bereich im Header (kein locale-Setup nötig).
@@ -598,17 +599,43 @@ def _build_teams_card(body: TeamsPostBody) -> dict:
     }
 
 
+def _configured_teams_targets() -> list[dict]:
+    """TEAMS_TARGETS mit gesetzter Webhook-URL (Reihenfolge bleibt erhalten)."""
+    return [t for t in TEAMS_TARGETS if t["webhook_url"]]
+
+
+def _resolve_teams_target(target_key: Optional[str]) -> dict:
+    """Wählt das Ziel-Team. `target_key=None` → Default (oder erstes konfiguriertes).
+    Hebt 400 an, wenn nichts konfiguriert ist oder der Key unbekannt/leer ist."""
+    configured = _configured_teams_targets()
+    if not configured:
+        raise HTTPException(status_code=400,
+                            detail="Kein Teams-Webhook konfiguriert (TEAMS_WEBHOOK_URL* fehlt).")
+    if target_key:
+        match = next((t for t in configured if t["key"] == target_key), None)
+        if match is None:
+            raise HTTPException(status_code=400,
+                                detail=f"Unbekanntes oder nicht konfiguriertes Team '{target_key}'.")
+        return match
+    return next((t for t in configured if t.get("default")), configured[0])
+
+
 @app.get("/api/teams/status")
 def teams_status():
-    return {"configured": bool(settings.teams_webhook_url)}
+    configured = _configured_teams_targets()
+    default_key = next((t["key"] for t in configured if t.get("default")),
+                       configured[0]["key"] if configured else None)
+    return {
+        "configured": bool(configured),
+        "targets": [{"key": t["key"], "label": t["label"]} for t in configured],
+        "default": default_key,
+    }
 
 
 @app.post("/api/teams/post")
 def post_to_teams(body: TeamsPostBody):
-    url = settings.teams_webhook_url
-    if not url:
-        raise HTTPException(status_code=400,
-                            detail="Teams-Webhook nicht konfiguriert (TEAMS_WEBHOOK_URL fehlt).")
+    target = _resolve_teams_target(body.target)
+    url = target["webhook_url"]
     if not any(b.kind == "story" or (b.content or "").strip() for b in body.blocks):
         raise HTTPException(status_code=400, detail="Leerer Post — nichts zu senden.")
 
@@ -616,11 +643,12 @@ def post_to_teams(body: TeamsPostBody):
         resp = httpx.post(url, json=_build_teams_card(body), timeout=15)
         resp.raise_for_status()
     except httpx.HTTPStatusError as e:
-        logger.warning("[teams] Webhook antwortete %s: %s", e.response.status_code, e.response.text[:300])
+        logger.warning("[teams] Webhook (%s) antwortete %s: %s",
+                       target["label"], e.response.status_code, e.response.text[:300])
         raise HTTPException(status_code=502,
                             detail=f"Teams lehnte den Post ab (HTTP {e.response.status_code}).")
     except httpx.HTTPError as e:
-        logger.warning("[teams] Webhook-Aufruf fehlgeschlagen: %s", e)
+        logger.warning("[teams] Webhook-Aufruf (%s) fehlgeschlagen: %s", target["label"], e)
         raise HTTPException(status_code=502, detail="Teams-Webhook nicht erreichbar.")
 
     return {"ok": True}

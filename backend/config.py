@@ -82,6 +82,26 @@ def split_tags(tags: list[str]) -> dict:
             flags.append(t[len("flag:"):])
     return {"types": types, "domains": domains, "flags": flags}
 
+# Microsoft Teams: ein oder mehrere Ziel-Channels (Power-Automate-Workflow-Webhook
+# "Beim Empfang einer Webhookanforderung in einem Kanal posten"). Reihenfolge =
+# Dropdown-Reihenfolge im Editor; `default: True` = Vorauswahl. Die Webhook-URLs
+# bleiben in Env-Vars (Secrets — das Repo ist public); die Labels dürfen hier
+# stehen. Ziele mit leerer URL werden ausgeblendet (Senden für sie deaktiviert).
+TEAMS_TARGETS = [
+    {
+        "key": "ki-news",
+        "label": "KI-News, Trends, Diskussionen",
+        "webhook_url": os.getenv("TEAMS_WEBHOOK_URL_2", ""),
+        "default": True,
+    },
+    {
+        "key": "matomo-report",
+        "label": "Matomo Report",
+        "webhook_url": os.getenv("TEAMS_WEBHOOK_URL", ""),
+        "default": False,
+    },
+]
+
 NEWSLETTER_SOURCES = [
     {
         "name": "KI-Newsletter Jens Polomski",
@@ -235,9 +255,8 @@ class Settings:
     hackernews_min_comments: int = int(os.getenv("HN_MIN_COMMENTS", "1"))
     reddit_import_secret: str = os.getenv("REDDIT_IMPORT_SECRET", "")
 
-    # Microsoft Teams: Power-Automate-Workflow-Webhook ("Beim Empfang einer
-    # Webhookanforderung in einem Kanal posten"). Leer = Senden deaktiviert.
-    teams_webhook_url: str = os.getenv("TEAMS_WEBHOOK_URL", "")
+    # Microsoft Teams: Ziel-Channels siehe TEAMS_TARGETS (oben). Geteilt über
+    # alle Ziele: das Ankündigungs-Headerbild.
     # Öffentlich (ohne Login) erreichbare URL des Ankündigungs-Headerbilds.
     # Teams lädt das Bild server-seitig — die URL muss anonym Bild-Bytes liefern.
     # Kein Secret → kanonischer Default hier; TEAMS_HEADER_IMAGE_URL überschreibt

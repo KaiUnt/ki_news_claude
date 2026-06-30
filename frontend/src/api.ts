@@ -198,14 +198,26 @@ export type TeamsBlock =
   | { kind: 'heading'; content: string }
   | { kind: 'text'; content: string }
 
+export interface TeamsTarget {
+  key: string
+  label: string
+}
+
 export interface TeamsPostPayload {
   header: string
   footer: string
   blocks: TeamsBlock[]
   week?: number
+  target?: string   // key aus TeamsTarget; weggelassen → Default-Ziel im Backend
 }
 
-export async function fetchTeamsStatus(): Promise<{ configured: boolean }> {
+export interface TeamsStatus {
+  configured: boolean
+  targets: TeamsTarget[]
+  default: string | null
+}
+
+export async function fetchTeamsStatus(): Promise<TeamsStatus> {
   const res = await fetch(`${BASE}/teams/status`)
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.json()
