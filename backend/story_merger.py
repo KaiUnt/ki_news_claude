@@ -27,6 +27,8 @@ _SYSTEM_PROMPT = """Du bist ein News-Deduplication-Experte für KI-Nachrichten.
 
 Aufgabe: Identifiziere unter den gegebenen Stories Gruppen, die dasselbe reale Ereignis beschreiben.
 
+Jede Story listet ihren Titel plus die echten Artikel-Schlagzeilen (nach dem Pfeil →). Urteile PRIMÄR nach den Schlagzeilen — der Story-Titel kann schwach oder generisch sein, die Schlagzeilen nennen das konkrete Produkt/Ereignis.
+
 Zusammenführen wenn:
 - Gleicher Produktname/Release, auch bei verschiedenen Titeln oder Blickwinkeln
   (Markt, Technik, Wettbewerb, Features → alles ein Event)
@@ -85,17 +87,39 @@ def merge_recent_stories() -> int:
 
 
 def _ask_claude(stories: list[Story]) -> list[list[int]]:
-    stories_block = "\n".join(
-        f"{s.id} | {s.title_de}"
-        for s in stories
+    # Content-aware input: each story is shown with its actual article headlines,
+    # not just the (sometimes weak or generic) German story title. A launch the
+    # clusterer split into several thinly-titled fragments is still recognizable
+    # as one event from the headlines — title-only input missed exactly those.
+    with Session(engine) as session:
+        story_ids = [s.id for s in stories if s.id is not None]
+        titles_by_story: dict[int, list[str]] = {}
+        if story_ids:
+            rows = session.exec(
+                select(Article.story_id, Article.title).where(
+                    Article.story_id.in_(story_ids)
+                )
+            ).all()
+            for sid, title in rows:
+                if sid is not None and title:
+                    titles_by_story.setdefault(sid, []).append(title)
+
+    def _block(s: Story) -> str:
+        heads = titles_by_story.get(s.id, [])[:3]
+        head_str = " ⋮ ".join(h[:90] for h in heads) if heads else "(keine Artikel)"
+        return f"{s.id} | {s.title_de} → {head_str}"
+
+    stories_block = "\n".join(_block(s) for s in stories)
+    user_msg = (
+        f"STORIES (letzte {settings.story_merge_hours}h):\n"
+        f"Format: ID | Story-Titel → Artikel-Schlagzeilen\n{stories_block}"
     )
-    user_msg = f"STORIES (letzte {settings.story_merge_hours}h):\nID | Titel\n{stories_block}"
 
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
     try:
         response = call_with_retry(lambda: client.messages.create(
             model=settings.model_id,
-            max_tokens=1024,
+            max_tokens=2048,
             system=[{
                 "type": "text",
                 "text": _SYSTEM_PROMPT,

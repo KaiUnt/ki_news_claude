@@ -34,7 +34,7 @@ Regeln:
 - DATUMSCHECK: Wenn ein Artikel ein Datum (published_at) Wochen/Monate vor dem first_seen einer offenen Story hat, ist es vermutlich ein älterer Backfill und gehört NICHT zur aktuellen Story — leg eine neue an.
 - Jedes wissenschaftliche Paper (ArXiv, HuggingFace Daily Papers) ist normalerweise eine eigene Story, außer ein News-Artikel berichtet direkt darüber.
 - Offene Stories mit dem Präfix [PAPER] sind reine Paper-Stories. Hänge NIEMALS einen Mainstream-News-Artikel an eine [PAPER]-Story — die bleibt eigenständig. (Ein Paper darf zu einer bestehenden News-Story stoßen, aber nicht umgekehrt.)
-- Story-Titel: kurz, auf Deutsch, max 7 Wörter (z.B. "GPT-5.5 Veröffentlichung", "Gemini 2.5 Flash Release"). Versionsnummern beibehalten.
+- Story-Titel: kurz, auf Deutsch, max 7 Wörter, IMMER spezifisch aus dem Artikel (z.B. "GPT-5.5 Veröffentlichung", "Gemini 2.5 Flash Release"). NIE generische Sammel-Titel wie "Sonstiges" — jeder neue Story-Titel muss das konkrete Thema benennen. Versionsnummern beibehalten.
 - story_id = null bedeutet: neue Story anlegen mit new_story_title.
 
 Antworte NUR als valides JSON-Array, kein Text davor/danach:
@@ -205,19 +205,40 @@ def cluster_articles(articles: list[Article], story_days: int = 3) -> dict[int, 
                         result[article_id] = story_id
                     else:
                         # Story was deleted/invalid — create new
-                        story_id = _create_story(session, new_title or "Sonstiges")
+                        title = _resolve_new_title(new_title, batch_by_id.get(article_id))
+                        story_id = _create_story(session, title)
                         result[article_id] = story_id
-                elif new_title:
-                    sid = _create_story(session, new_title)
-                    result[article_id] = sid
                 else:
-                    # Fallback: create solo story with article title
-                    article = session.get(Article, article_id)
-                    title = article.title[:60] if article else "Unbekannt"
+                    # New story. Never a generic bucket title ("Sonstiges"): it
+                    # carries no signal for the title-based story_merge and the
+                    # digest excludes it by title — fall back to the article title.
+                    title = _resolve_new_title(new_title, batch_by_id.get(article_id))
                     sid = _create_story(session, title)
                     result[article_id] = sid
 
     return result
+
+
+_GENERIC_TITLES = {
+    "", "sonstiges", "sonstige", "verschiedenes", "diverses",
+    "allgemein", "news", "ki-news", "unbekannt",
+}
+
+
+def _resolve_new_title(new_title: str | None, article: Article | None) -> str:
+    """Resolve the title for a brand-new story, never returning a generic bucket
+    label. Claude occasionally titles a new story "Sonstiges" for articles it
+    can't confidently place; that title is poison downstream — the title-only
+    story_merge can't recognize it as a duplicate and the digest excludes it by
+    title. Fall back to the article's own headline so the cluster stays
+    identifiable (and mergeable).
+    """
+    title = (new_title or "").strip()
+    if title.lower() in _GENERIC_TITLES:
+        if article and article.title:
+            return article.title[:60]
+        return title or "Unbekannt"
+    return title
 
 
 def _create_story(session: Session, title_de: str, source_count: int = 1) -> int:
