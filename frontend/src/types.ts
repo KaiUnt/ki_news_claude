@@ -90,6 +90,7 @@ export interface RedditSubredditStats {
 export interface DigestTopStory {
   rank: number
   why: string
+  new_sources?: number
   story: Story
 }
 
@@ -101,7 +102,9 @@ export interface DigestLatest {
   meta_summary_de: string
   model_id: string
   top_story_count: number
+  recurring_story_count?: number
   top_stories: DigestTopStory[]
+  recurring_stories?: DigestTopStory[]
 }
 
 export interface DigestSummary {

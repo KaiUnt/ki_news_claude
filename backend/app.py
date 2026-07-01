@@ -768,14 +768,69 @@ def _digest_summary(d: DailyDigest) -> dict:
         "meta_summary_de": d.meta_summary_de,
         "model_id": d.model_id,
         "top_story_count": len(d.top_stories),
+        "recurring_story_count": len(d.recurring_stories),
         "category_id": d.category_id,
     }
 
 
+def _newest_article(articles: list[Article]) -> Optional[Article]:
+    if not articles:
+        return None
+    return max(articles, key=lambda a: a.published_at or a.fetched_at or datetime.min)
+
+
+def _hydrate_entries(
+    entries: list[dict],
+    story_by_id: dict[int, Story],
+    source_map: dict[int, list[Article]],
+    primary_info: dict[int, dict],
+    favorite_ids: set[int],
+    newest_primary: bool = False,
+) -> list[dict]:
+    """Attach hydrated story data to digest entries. With newest_primary the
+    headline/link point to the story's newest article (used for the recurring
+    section, where the latest development — not the longest article — matters)."""
+    out = []
+    for entry in entries:
+        sid = entry.get("story_id")
+        story = story_by_id.get(sid)
+        if story is None:
+            continue
+        primary_title = primary_info.get(sid, {}).get("title")
+        primary_url = primary_info.get(sid, {}).get("url")
+        if newest_primary:
+            newest = _newest_article(source_map.get(sid, []))
+            if newest:
+                primary_title = newest.title
+                primary_url = newest.url
+        out.append({
+            "rank": entry.get("rank"),
+            "why": entry.get("why"),
+            "new_sources": entry.get("new_sources"),
+            "story": _story_to_dict(
+                story,
+                sources=source_map.get(sid, []),
+                primary_title=primary_title,
+                primary_url=primary_url,
+                is_favorite=sid in favorite_ids,
+            ),
+        })
+    out.sort(key=lambda x: x.get("rank") or 999)
+    return out
+
+
 def _hydrate_digest(session: Session, digest: DailyDigest) -> dict:
-    story_ids = [t.get("story_id") for t in digest.top_stories if t.get("story_id")]
+    top_entries = digest.top_stories
+    rec_entries = digest.recurring_stories
+    story_ids = list({
+        e.get("story_id")
+        for e in (top_entries + rec_entries)
+        if e.get("story_id")
+    })
+
     story_by_id: dict[int, Story] = {}
-    primaries: dict[int, str] = {}
+    primary_info: dict[int, dict] = {}
+    source_map: dict[int, list[Article]] = {}
     favorite_ids: set[int] = set()
     if story_ids:
         stories = session.exec(select(Story).where(Story.id.in_(story_ids))).all()
@@ -783,32 +838,16 @@ def _hydrate_digest(session: Session, digest: DailyDigest) -> dict:
         primary_info = _batch_primary_info(session, story_ids)
         favorite_ids = _favorite_story_ids(session, story_ids)
         source_map = _batch_story_articles(session, story_ids)
-    else:
-        primary_info = {}
-        source_map = {}
-
-    top_with_data = []
-    for entry in digest.top_stories:
-        sid = entry.get("story_id")
-        story = story_by_id.get(sid)
-        if story is None:
-            continue
-        top_with_data.append({
-            "rank": entry.get("rank"),
-            "why": entry.get("why"),
-            "story": _story_to_dict(
-                story,
-                sources=source_map.get(sid, []),
-                primary_title=primary_info.get(sid, {}).get("title"),
-                primary_url=primary_info.get(sid, {}).get("url"),
-                is_favorite=sid in favorite_ids,
-            ),
-        })
-    top_with_data.sort(key=lambda x: x.get("rank") or 999)
 
     return {
         **_digest_summary(digest),
-        "top_stories": top_with_data,
+        "top_stories": _hydrate_entries(
+            top_entries, story_by_id, source_map, primary_info, favorite_ids,
+        ),
+        "recurring_stories": _hydrate_entries(
+            rec_entries, story_by_id, source_map, primary_info, favorite_ids,
+            newest_primary=True,
+        ),
     }
 
 

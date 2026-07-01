@@ -59,6 +59,7 @@ class Story(SQLModel, table=True):
     source_count: int = Field(default=0)
     is_processed: bool = Field(default=False)  # True once summary_de is generated
     first_digest_id: Optional[int] = Field(default=None, foreign_key="dailydigest.id", index=True)
+    last_digest_at: Optional[datetime] = Field(default=None)  # when the story last appeared in a digest (main or recurring)
     category_id: Optional[int] = Field(default=None, foreign_key="category.id")
 
     @property
@@ -103,6 +104,9 @@ class DailyDigest(SQLModel, table=True):
     window_end: datetime
     meta_summary_de: str
     top_story_ids_json: str  # JSON: [{"story_id": int, "rank": int, "why": str}, ...]
+    # JSON: [{"story_id": int, "rank": int, "new_sources": int, "why": str}, ...]
+    # Developing stories re-admitted from earlier digests (global digest only).
+    recurring_story_ids_json: Optional[str] = Field(default=None)
     model_id: str
     raw_response: Optional[str] = None
     category_id: Optional[int] = Field(default=None, foreign_key="category.id", index=True)
@@ -117,6 +121,16 @@ class DailyDigest(SQLModel, table=True):
     @top_stories.setter
     def top_stories(self, value: list[dict]) -> None:
         self.top_story_ids_json = json.dumps(value, ensure_ascii=False)
+
+    @property
+    def recurring_stories(self) -> list[dict]:
+        if self.recurring_story_ids_json:
+            return json.loads(self.recurring_story_ids_json)
+        return []
+
+    @recurring_stories.setter
+    def recurring_stories(self, value: list[dict]) -> None:
+        self.recurring_story_ids_json = json.dumps(value, ensure_ascii=False)
 
 
 class FavoriteStory(SQLModel, table=True):
@@ -205,6 +219,9 @@ def _migrate_schema() -> None:
         if "category_id" not in story_cols:
             conn.execute(text("ALTER TABLE story ADD COLUMN category_id INTEGER REFERENCES category(id)"))
             conn.commit()
+        if "last_digest_at" not in story_cols:
+            conn.execute(text("ALTER TABLE story ADD COLUMN last_digest_at DATETIME"))
+            conn.commit()
 
         ms_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(managedsource)"))}
         if "category_id" not in ms_cols:
@@ -225,6 +242,9 @@ def _migrate_schema() -> None:
         dd_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(dailydigest)"))}
         if "category_id" not in dd_cols:
             conn.execute(text("ALTER TABLE dailydigest ADD COLUMN category_id INTEGER REFERENCES category(id)"))
+            conn.commit()
+        if "recurring_story_ids_json" not in dd_cols:
+            conn.execute(text("ALTER TABLE dailydigest ADD COLUMN recurring_story_ids_json TEXT"))
             conn.commit()
 
 

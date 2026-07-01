@@ -19,6 +19,12 @@ from .config import settings, split_tags
 from .db import Article, Story, DailyDigest, UserProfile, Category, ManagedSource, engine, get_prompt
 from .source_catalog import PAPER_SOURCES, story_signals_for_source_names
 from .claude_retry import call_with_retry
+from .summarizer import Summarizer
+
+# Recurring section tuning
+_RECURRING_MIN_NEW_SOURCES = 2   # min. neue Quellen seit letztem Auftritt
+_RECURRING_MAX_ITEMS = 5         # max. Stories in der Recurring-Sektion
+_RECURRING_LOOKBACK_DAYS = 3     # nur Stories, die zuletzt in diesem Fenster aktiv waren
 
 
 _SYSTEM_PROMPT = """Du bist der News-Editor für ein persönliches KI-News-Dashboard.
@@ -232,6 +238,30 @@ def generate(
         return None
     result, raw_response = call_result
 
+    # Recurring section (global digest only): already-featured sagas that gained
+    # >= N new sources since last appearance. Computed only after the main
+    # curation succeeds — so a skipped digest wastes no re-summary work. Each
+    # picked story is re-summarized (newest-weighted) so its card reflects the
+    # new development, not the original beat.
+    recurring_entries: list[dict] = []
+    if category_id is None:
+        main_ids = {
+            e.get("story_id") for e in result["top_stories"]
+            if isinstance(e.get("story_id"), int)
+        }
+        with Session(engine) as session:
+            recurring_entries = _compute_recurring(session, main_ids, window_end)
+        if recurring_entries:
+            summarizer = Summarizer()
+            for entry in recurring_entries:
+                try:
+                    summarizer.resummarize_latest(entry["story_id"])
+                except Exception as exc:
+                    logger.warning(
+                        "[Digest] recurring re-summary failed for story %s: %s",
+                        entry["story_id"], exc,
+                    )
+
     digest = DailyDigest(
         user_profile_id=profile_id,
         generated_at=window_end,
@@ -243,25 +273,115 @@ def generate(
         category_id=category_id,
     )
     digest.top_stories = result["top_stories"]
+    digest.recurring_stories = recurring_entries
 
     with Session(engine, expire_on_commit=False) as session:
         session.add(digest)
         session.commit()
         session.refresh(digest)
 
-        # Only global digests mark first_digest_id on stories
+        # Only global digests mark first_digest_id / last_digest_at on stories
         if category_id is None:
             for entry in result["top_stories"]:
                 sid = entry.get("story_id")
                 if not isinstance(sid, int):
                     continue
                 story = session.get(Story, sid)
-                if story and story.first_digest_id is None:
-                    story.first_digest_id = digest.id
+                if story:
+                    if story.first_digest_id is None:
+                        story.first_digest_id = digest.id
+                    story.last_digest_at = digest.generated_at
+                    session.add(story)
+            for entry in recurring_entries:
+                story = session.get(Story, entry["story_id"])
+                if story:
+                    story.last_digest_at = digest.generated_at
                     session.add(story)
             session.commit()
 
     return digest
+
+
+def _compute_recurring(
+    session: Session,
+    exclude_ids: set[int],
+    now: datetime,
+) -> list[dict]:
+    """Developing stories for the recurring section (global digest only).
+
+    A story qualifies if it was already featured in an earlier digest
+    (first_digest_id set) AND has picked up >= _RECURRING_MIN_NEW_SOURCES new
+    articles since its last digest appearance — i.e. a saga that keeps getting
+    coverage (a model announced, then re-released). Ranked deterministically by
+    new-source count then recency; no Claude curation call.
+
+    Reference point for "new since last appearance": Story.last_digest_at, or —
+    for stories featured before this field existed — the generated_at of the
+    story's first_digest_id.
+    """
+    candidates = list(session.exec(
+        select(Story)
+        .where(Story.is_processed == True)
+        .where(Story.first_digest_id.is_not(None))
+        .where(Story.last_updated >= now - timedelta(days=_RECURRING_LOOKBACK_DAYS))
+        .where(func.lower(Story.title_de) != "sonstiges")
+    ).all())
+    candidates = [s for s in candidates if s.id not in exclude_ids]
+    if not candidates:
+        return []
+
+    cand_ids = [s.id for s in candidates]
+    art_rows = session.exec(
+        select(
+            Article.story_id,
+            Article.source_name,
+            Article.source_type,
+            Article.fetched_at,
+            func.coalesce(Article.published_at, Article.fetched_at),
+        ).where(Article.story_id.in_(cand_ids))
+    ).all()
+    arts_by_story: dict[int, list] = {}
+    for sid, sname, stype, fetched, pub in art_rows:
+        arts_by_story.setdefault(sid, []).append((sname, stype, fetched, pub))
+
+    # Bootstrap reference for stories featured before last_digest_at existed.
+    need_first = {s.first_digest_id for s in candidates if s.last_digest_at is None and s.first_digest_id}
+    first_gen: dict[int, datetime] = {}
+    if need_first:
+        for did, gen in session.exec(
+            select(DailyDigest.id, DailyDigest.generated_at).where(DailyDigest.id.in_(need_first))
+        ).all():
+            first_gen[did] = gen
+
+    scored: list[tuple[int, int, Optional[datetime]]] = []
+    for s in candidates:
+        arts = arts_by_story.get(s.id, [])
+        if not arts:
+            continue
+        if story_signals_for_source_names([a[0] for a in arts])["story_kind"] == "paper":
+            continue
+        if all(a[1] == "newsletter" for a in arts):
+            continue
+        ref = s.last_digest_at or first_gen.get(s.first_digest_id)
+        if ref is None:
+            continue
+        new_count = sum(1 for a in arts if a[2] and a[2] > ref)
+        if new_count < _RECURRING_MIN_NEW_SOURCES:
+            continue
+        newest_pub = max((a[3] for a in arts if a[3]), default=None)
+        scored.append((s.id, new_count, newest_pub))
+
+    scored.sort(key=lambda x: (x[1], x[2] or datetime.min), reverse=True)
+
+    entries: list[dict] = []
+    for rank, (sid, new_count, _pub) in enumerate(scored[:_RECURRING_MAX_ITEMS], start=1):
+        entries.append({
+            "story_id": sid,
+            "rank": rank,
+            "new_sources": new_count,
+            "why": f"{new_count} neue Quellen seit dem letzten Digest — die Story entwickelt sich weiter.",
+        })
+    return entries
 
 
 def _compute_window_start(

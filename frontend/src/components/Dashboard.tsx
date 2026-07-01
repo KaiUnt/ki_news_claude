@@ -159,7 +159,9 @@ export function Dashboard({
   onSelectStory,
   onToggleFavorite,
 }: Props) {
-  const topStoryIds = new Set((digest?.top_stories ?? []).map(entry => entry.story.id))
+  const topStoryIds = new Set(
+    [...(digest?.top_stories ?? []), ...(digest?.recurring_stories ?? [])].map(entry => entry.story.id)
+  )
   const visibleResearchStories = researchStories.filter(story => !topStoryIds.has(story.id))
   const visiblePaperStories = paperStories.filter(story => !topStoryIds.has(story.id))
 
@@ -228,6 +230,30 @@ export function Dashboard({
         <div className="text-center py-10 text-slate-500 text-sm">
           Keine Top-Stories im aktuellen Digest.
         </div>
+      ) : null}
+
+      {digest && (digest.recurring_stories?.length ?? 0) > 0 ? (
+        <section>
+          <div className="flex items-baseline gap-2 mb-4">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 self-center" />
+            <h2 className="text-sm uppercase tracking-wider text-slate-500 font-medium m-0">
+              Weiterentwickelt
+            </h2>
+            <span className="text-xs text-slate-600">
+              Bereits berichtete Stories mit neuen Entwicklungen seit dem letzten Digest
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {digest.recurring_stories!.map(entry => (
+              <TopStoryCard
+                key={entry.story.id}
+                entry={entry}
+                onSelect={onSelectStory}
+                onToggleFavorite={onToggleFavorite}
+              />
+            ))}
+          </div>
+        </section>
       ) : null}
 
       <section className="bg-slate-900/40 border border-slate-800 rounded-2xl p-6 sm:p-8">

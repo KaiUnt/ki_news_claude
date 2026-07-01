@@ -7,6 +7,8 @@ story on three axes (type / domains / flags); paper stories skip the tag step.
 is_processed=True afterwards.
 """
 import logging
+from datetime import datetime
+
 import anthropic
 from sqlmodel import Session, select
 
@@ -176,6 +178,50 @@ class Summarizer:
                     session.commit()
                     processed += 1
         return processed
+
+    def resummarize_latest(self, story_id: int) -> bool:
+        """Re-summarize an evolving story, weighting the NEWEST article so the
+        summary reflects the latest development rather than the original beat.
+
+        Used by the digest's recurring section: when a saga that was already
+        featured (e.g. a model announced, then re-released) picks up new
+        coverage, its stored summary is stale. Refreshes summary_de + tags in
+        place; title_de is left untouched (the story keeps its identity).
+        Returns True if updated. Papers never recur → skipped.
+        """
+        with Session(engine) as session:
+            story = session.get(Story, story_id)
+            articles = list(session.exec(
+                select(Article).where(Article.story_id == story_id)
+            ).all())
+        if not story or not articles:
+            return False
+
+        signals = story_signals_for_source_names([a.source_name for a in articles])
+        if signals["story_kind"] == "paper":
+            return False
+
+        def _recency(a: Article) -> datetime:
+            return a.published_at or a.fetched_at or datetime.min
+
+        with_content = [a for a in articles if a.raw_content]
+        newest = max(with_content or articles, key=_recency)
+
+        result = self._call_general(story, newest)
+        if result.get("summary_de") is None:
+            return False
+        new_tags = _build_tags(result)
+        if all(a.source_type == "newsletter" for a in articles) and "flag:newsletter" not in new_tags:
+            new_tags.append("flag:newsletter")
+
+        with Session(engine) as session:
+            s = session.get(Story, story_id)
+            if s:
+                s.summary_de = result["summary_de"]
+                s.tags = new_tags
+                session.add(s)
+                session.commit()
+        return True
 
     def _call_general(self, story: Story, best_article: Article) -> dict:
         user_content = (
